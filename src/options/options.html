@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PageGloss</title>
+  <link rel="stylesheet" href="../styles/ui.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H19v13.5H6.5A2.5 2.5 0 0 0 4 20z"></path>
+            <path d="M4 6.5V20"></path>
+            <path d="M8 8.5h7M8 12h5"></path>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h1 id="pageTitle"></h1>
+          <p id="pageSub"></p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="save-state" id="saveState" role="status" aria-live="polite"></span>
+        <button class="btn" id="test" type="button"></button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card" id="apiCard">
+        <h2 id="apiTitle"></h2>
+
+        <div class="field">
+          <label for="baseUrl" id="baseUrlLabel"></label>
+          <input type="url" id="baseUrl" spellcheck="false" autocomplete="off" placeholder="https://api.openai.com/v1">
+          <p class="hint" id="baseUrlHint"></p>
+        </div>
+
+        <div class="field">
+          <label for="apiKey" id="apiKeyLabel"></label>
+          <div class="input-row">
+            <input type="password" id="apiKey" spellcheck="false" autocomplete="off" placeholder="sk-...">
+            <button class="btn ghost" id="toggleKey" type="button"></button>
+          </div>
+          <p class="hint" id="apiKeyHint"></p>
+        </div>
+
+        <div class="field">
+          <label for="model" id="modelLabel"></label>
+          <div class="input-row">
+            <input type="text" id="model" spellcheck="false" autocomplete="off" list="modelList" placeholder="gpt-4o-mini">
+            <button class="btn ghost" id="fetchModels" type="button"></button>
+          </div>
+          <datalist id="modelList"></datalist>
+        </div>
+
+        <div class="field two-col">
+          <div>
+            <label for="temperature" id="temperatureLabel"></label>
+            <div class="range-row">
+              <input type="range" id="temperature" min="0" max="1.5" step="0.05">
+              <output id="temperatureValue" for="temperature">0.3</output>
+            </div>
+          </div>
+          <div>
+            <label for="maxTokens" id="maxTokensLabel"></label>
+            <input type="number" id="maxTokens" min="64" max="32000" step="32">
+          </div>
+        </div>
+
+        <label class="check" for="stream">
+          <input type="checkbox" id="stream">
+          <span id="streamLabel"></span>
+        </label>
+
+        <div class="field">
+          <div class="row-between">
+            <label for="systemPrompt" id="systemPromptLabel"></label>
+            <span class="inline-actions">
+              <button class="btn ghost small" id="showDefaultPrompt" type="button"></button>
+              <button class="btn ghost small" id="resetPrompt" type="button"></button>
+            </span>
+          </div>
+          <textarea id="systemPrompt" rows="6" spellcheck="false"></textarea>
+          <p class="hint" id="systemPromptHint"></p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 id="contextTitle"></h2>
+
+        <div class="field">
+          <label for="maxContextChars" id="maxContextLabel"></label>
+          <input type="number" id="maxContextChars" min="500" max="200000" step="500">
+        </div>
+
+        <div class="field">
+          <label id="matchModeLabel"></label>
+          <div class="modes match-modes" id="matchModes" role="radiogroup">
+            <label class="mode"><input type="radio" name="pg-match-mode" value="smart"><span id="matchModeSmart"></span></label>
+            <label class="mode"><input type="radio" name="pg-match-mode" value="loose"><span id="matchModeLoose"></span></label>
+            <label class="mode"><input type="radio" name="pg-match-mode" value="strict"><span id="matchModeStrict"></span></label>
+          </div>
+          <p class="hint" id="matchModeHint"></p>
+        </div>
+
+        <label class="check" for="markSentenceTokens">
+          <input type="checkbox" id="markSentenceTokens">
+          <span id="markSentenceTokensLabel"></span>
+        </label>
+
+        <label class="check" for="cardHoverOpen">
+          <input type="checkbox" id="cardHoverOpen">
+          <span id="cardHoverOpenLabel"></span>
+        </label>
+
+        <div class="field">
+          <label for="language" id="languageLabel"></label>
+          <select id="language">
+            <option value="auto"></option>
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 id="dataTitle"></h2>
+        <p class="hint" id="cacheSummary"></p>
+        <div class="button-row">
+          <button class="btn" id="export" type="button"></button>
+          <button class="btn" id="import" type="button"></button>
+          <button class="btn danger" id="clearAll" type="button"></button>
+        </div>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+      </section>
+    </main>
+  </div>
+  <script src="../shared/messages.js"></script>
+  <script src="../shared/i18n.js"></script>
+  <script src="../shared/storage.js"></script>
+  <script src="../shared/ui.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

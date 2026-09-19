@@ -1,0 +1,52 @@
+/*
+ * PageGloss - styles injected into every page.
+ * Highlights inherit the surrounding typography; padding and margins stay at
+ * zero so the text flow is identical to the untouched page. The ink colour is
+ * computed per highlight (dark on light backgrounds, light on dark ones) and
+ * passed in through --pg-mark-ink.
+ */
+pagegloss-mark {
+  display: inline;
+  background-color: var(--pg-mark-color, #fff2a8);
+  color: var(--pg-mark-ink, inherit);
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  transition: filter .12s ease-out, box-shadow .12s ease-out;
+}
+
+pagegloss-mark:hover {
+  filter: brightness(.95);
+  box-shadow: 0 0 0 2px var(--pg-mark-color, #fff2a8);
+}
+
+/* Secondary marks (individual words of a selected sentence) are softer. */
+pagegloss-mark[data-pg-secondary="1"] {
+  background-color: color-mix(in srgb, var(--pg-mark-color, #fff2a8) 62%, transparent);
+}
+
+pagegloss-mark:focus-visible {
+  outline: 2px solid #4c6fd6;
+  outline-offset: 1px;
+}
+
+pagegloss-ui {
+  all: initial;
+  display: block;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* Keep the annotation chrome out of printed output. */
+@media print {
+  pagegloss-ui {
+    display: none !important;
+  }
+
+  pagegloss-mark {
+    background: none !important;
+  }
+}

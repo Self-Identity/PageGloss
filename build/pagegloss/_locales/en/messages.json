@@ -1,0 +1,11 @@
+{
+  "appName": {
+    "message": "PageGloss Text Explainer"
+  },
+  "appDesc": {
+    "message": "Select text, right-click to highlight every repeated occurrence on the page, and get LLM annotations you can question in a hover card."
+  },
+  "cmdToggle": {
+    "message": "Enable / pause PageGloss text marking"
+  }
+}
