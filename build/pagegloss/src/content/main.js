@@ -731,6 +731,13 @@
       context: buildContext(annotation.text, annotation.anchorElement || document.body, annotation.sentence || ''),
       history: []
     }, {
+      onReasoning: function (chunk) {
+        if (previous) {
+          card.removeState(previous);
+          previous = null;
+        }
+        if (card.appendReasoning) card.appendReasoning(chunk);
+      },
       onToken: function (chunk) {
         if (previous) {
           card.removeState(previous);
@@ -748,12 +755,17 @@
           card.scrollToEnd();
         }
       },
-      onDone: function (full) {
+      onDone: function (full, meta) {
         if (done) return;
         done = true;
         if (previous) {
           card.removeState(previous);
           previous = null;
+        }
+        if (meta && meta.reasoningOnly) {
+          // The model spent its budget on the chain of thought: keep what it
+          // produced and explain how to get a real answer.
+          card.addNotice(t('cardReasoningOnly'));
         }
         var text = full || answerText;
         if (!text) {
@@ -793,6 +805,9 @@
   }
 
   function askQuestion(annotation, card, question, handlers) {
+    if (handlers && !handlers.onReasoning && card && card.appendReasoning) {
+      handlers.onReasoning = function (chunk) { card.appendReasoning(chunk); };
+    }
     var config = llmConfigState();
     if (!config.ready) {
       notifyNotConfigured(config, null);
@@ -836,10 +851,15 @@
         handlers.onToken(message.delta || '');
         return;
       }
+      if (message.type === 'reasoning') {
+        if (aborted) return;
+        if (handlers.onReasoning) handlers.onReasoning(message.delta || '');
+        return;
+      }
       if (message.type === 'done') {
         if (aborted) return;
         settled = true;
-        handlers.onDone(message.text || '');
+        handlers.onDone(message.text || '', message);
         try { port.disconnect(); } catch (err) { /* ignore */ }
         return;
       }
@@ -874,6 +894,22 @@
     };
   }
 
+  /** Turn the machine readable empty-answer reason into a sentence. */
+  function emptyAnswerText(detail) {
+    var raw = String(detail || '');
+    var suffix = raw ? t('errEmptyDetail', { s: raw }) : '';
+    if (raw.indexOf('reasoning_only_length') >= 0) return t('errEmptyReasoningLength');
+    if (raw.indexOf('reasoning_only') >= 0) return t('errEmptyReasoning');
+    var finish = /finish_reason=([a-z_]+)/i.exec(raw);
+    if (finish) {
+      var code = finish[1].toLowerCase();
+      if (code === 'length') return t('errEmptyFinishLength') + suffix;
+      if (code === 'content_filter') return t('errEmptyFinishFilter') + suffix;
+    }
+    if (raw.indexOf('keys=') >= 0) return t('errEmptyShape') + suffix;
+    return t('errEmpty') + suffix;
+  }
+
   function localizedError(message) {
     if (message.code === 'no-config') return t('errNoConfig');
     if (message.code === 'no-key') return t('errNoKey');
@@ -890,7 +926,7 @@
     }
     if (message.code === 'timeout') return t('errTimeout', { n: Math.round((message.timeoutMs || 0) / 1000) });
     if (message.code === 'network') return t('errNetwork', { s: message.detail || '' });
-    if (message.code === 'empty') return t('errEmpty');
+    if (message.code === 'empty') return emptyAnswerText(message.detail);
     if (message.code === 'aborted') return t('errAborted');
     return message.detail || t('errUnknown');
   }

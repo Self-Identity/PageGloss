@@ -80,30 +80,106 @@
     return copy;
   }
 
-  function normalizeBaseUrl(value) {
+  /** Clean up user input without inventing a path. Empty path stays empty. */
+  function normalizeInputUrl(value) {
     var url = String(value || '').trim();
     if (!url) return '';
     url = url.replace(/\s+/g, '');
     url = url.replace(/\/+$/, '');
-    if (/\/chat\/completions$/.test(url)) return url;
-    if (/\/v\d+$/.test(url)) return url + '/chat/completions';
-    return url + '/v1/chat/completions';
+    return url;
   }
 
+  /**
+   * Chat completion candidates for a user supplied address, most likely first.
+   *
+   * A bare origin is ambiguous: OpenAI needs /v1/chat/completions while DeepSeek
+   * 404s there (it serves /chat/completions directly), so both are offered and
+   * the caller falls back on 404. The typed value is never rewritten.
+   */
+  function chatEndpointCandidates(value) {
+    var input = normalizeInputUrl(value);
+    var out = [];
+    function push(url) {
+      if (url && out.indexOf(url) < 0) out.push(url);
+    }
+    if (!input) return out;
+    if (/\/chat\/completions$/.test(input) || /\/completions$/.test(input)) {
+      push(input);
+      return out;
+    }
+    if (/\/v\d+$/.test(input)) {
+      push(input + '/chat/completions');
+      return out;
+    }
+    var parsed = null;
+    try {
+      parsed = new URL(input);
+    } catch (err) {
+      push(input + '/v1/chat/completions');
+      return out;
+    }
+    var path = parsed.pathname.replace(/\/+$/, '');
+    if (!path) {
+      push(parsed.origin + '/v1/chat/completions');
+      push(parsed.origin + '/chat/completions');
+      return out;
+    }
+    push(input + '/chat/completions');
+    return out;
+  }
+
+  /**
+   * Candidate URLs for the OpenAI-compatible model list, most likely first.
+   * Each candidate is derived from the user's input, not from a rewritten one.
+   */
+  function modelsEndpointCandidates(value) {
+    var input = normalizeInputUrl(value);
+    var out = [];
+    function push(url) {
+      if (url && out.indexOf(url) < 0) out.push(url);
+    }
+    if (!input) return out;
+
+    var base = null;
+    try {
+      base = new URL(input);
+    } catch (err) {
+      return out;
+    }
+    var path = base.pathname.replace(/\/+$/, '');
+    var origin = base.origin;
+
+    if (/\/chat\/completions$/.test(path)) {
+      // Explicit chat endpoint: the list sits next to it.
+      push(origin + path.slice(0, path.length - '/chat/completions'.length) + '/models');
+      push(origin + '/models');
+      return out;
+    }
+    if (/\/v\d+$/.test(path)) {
+      push(origin + path + '/models');
+      push(origin + path.replace(/\/v\d+$/, '') + '/models');
+      return out;
+    }
+    if (path && path !== '/') {
+      push(origin + path + '/models');
+      push(origin + path + '/v1/models');
+      return out;
+    }
+    // Bare origin: OpenAI style first, then DeepSeek style.
+    push(origin + '/v1/models');
+    push(origin + '/models');
+    return out;
+  }
+
+  /** Origin pattern for host permissions, derived from raw user input. */
   function baseUrlOrigin(value) {
-    var url = normalizeBaseUrl(value);
+    var url = normalizeInputUrl(value);
     if (!url) return '';
     try {
       return new URL(url).origin + '/*';
     } catch (err) {
       return '';
     }
-  }
-
-  function modelsEndpoint(value) {
-    var url = normalizeBaseUrl(value);
-    if (!url) return '';
-    return url.replace(/\/chat\/completions$/, '/models');
   }
 
   function truncate(text, limit) {
@@ -167,10 +243,22 @@
     if (message.code === 'no-config') return { key: 'errNoConfig' };
     if (message.code === 'no-key') return { key: 'errNoKey' };
     if (message.code === 'permission') return { key: 'errPermission' };
-    if (message.code === 'empty') return { key: 'errEmpty' };
+    if (message.code === 'empty') return { key: 'errEmpty', values: { s: message.detail || '' } };
     if (message.code === 'aborted') return { key: 'errAborted' };
     if (message.code === 'timeout') return { key: 'errTimeout', values: { n: Math.round((message.timeoutMs || 0) / 1000) } };
     if (message.code === 'network') return { key: 'errNetwork', values: { s: message.detail || '' } };
+    if (message.code === 'endpoint-not-found') {
+      return {
+        key: 'errEndpointNotFound',
+        values: { s: (message.tried || []).join(' , ') || message.detail || '' }
+      };
+    }
+    if (message.code === 'models-unavailable') {
+      return {
+        key: 'errModelsUnavailable',
+        values: { s: (message.tried || []).join(' , ') || message.detail || '' }
+      };
+    }
     if (message.code === 'http') {
       var status = message.status || 0;
       var keys = {
@@ -211,9 +299,10 @@
     DEFAULT_SYSTEM_PROMPT: DEFAULT_SYSTEM_PROMPT,
     DEFAULT_SYSTEM_PROMPT_EN: DEFAULT_SYSTEM_PROMPT_EN,
     cloneDefaultSettings: cloneDefaultSettings,
-    normalizeBaseUrl: normalizeBaseUrl,
+    normalizeInputUrl: normalizeInputUrl,
+    chatEndpointCandidates: chatEndpointCandidates,
     baseUrlOrigin: baseUrlOrigin,
-    modelsEndpoint: modelsEndpoint,
+    modelsEndpointCandidates: modelsEndpointCandidates,
     truncate: truncate,
     normalizeUrlKey: normalizeUrlKey,
     storageKey: storageKey,

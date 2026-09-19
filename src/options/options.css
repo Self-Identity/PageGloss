@@ -402,3 +402,100 @@ textarea:focus {
   border-color: var(--pg-accent-border);
   background: var(--pg-accent-soft);
 }
+
+/* Resolved endpoint preview */
+.hint.resolved {
+  padding: 6px 8px;
+  border: 1px dashed var(--pg-border);
+  border-radius: 8px;
+  background: var(--pg-bg);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+/* Model picker: a real scrollable list instead of a native datalist */
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--pg-fg-dim);
+  background: var(--pg-bg);
+  border: 1px solid var(--pg-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.model-toggle:hover { color: var(--pg-fg); background: var(--pg-hover); }
+
+.model-toggle .caret {
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  transition: transform .12s ease-out;
+}
+
+.model-toggle[aria-expanded="true"] .caret { transform: rotate(180deg); }
+
+.model-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--pg-border);
+  border-radius: 9px;
+  background: var(--pg-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-list[hidden] { display: none; }
+
+.model-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.model-item:hover { background: var(--pg-hover); }
+.model-item[aria-selected="true"] { background: var(--pg-accent-soft); }
+
+.model-item .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.model-item .tag {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--pg-fg-dim);
+  white-space: nowrap;
+}

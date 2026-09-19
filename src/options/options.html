@@ -35,8 +35,9 @@
 
         <div class="field">
           <label for="baseUrl" id="baseUrlLabel"></label>
-          <input type="url" id="baseUrl" spellcheck="false" autocomplete="off" placeholder="https://api.openai.com/v1">
+          <input type="url" id="baseUrl" spellcheck="false" autocomplete="off" placeholder="https://api.deepseek.com">
           <p class="hint" id="baseUrlHint"></p>
+          <p class="hint resolved" id="resolvedEndpoint" hidden></p>
         </div>
 
         <div class="field">
@@ -51,10 +52,13 @@
         <div class="field">
           <label for="model" id="modelLabel"></label>
           <div class="input-row">
-            <input type="text" id="model" spellcheck="false" autocomplete="off" list="modelList" placeholder="gpt-4o-mini">
+            <input type="text" id="model" spellcheck="false" autocomplete="off" placeholder="deepseek-chat">
             <button class="btn ghost" id="fetchModels" type="button"></button>
           </div>
-          <datalist id="modelList"></datalist>
+          <div class="model-picker">
+            <button class="model-toggle" id="modelToggle" type="button" aria-expanded="false" hidden></button>
+            <ul class="model-list" id="modelList" role="listbox" hidden></ul>
+          </div>
         </div>
 
         <div class="field two-col">

@@ -530,7 +530,90 @@ function moduleFiles() {
     .filter((file) => /^\s*(import|export)\s/m.test(read(file)));
 }
 
+/**
+ * Catch a shared helper that is called but never imported or declared: exactly
+ * the class of bug that broke the model list (normalizeBaseUrl used without an
+ * import), which the ESM loader only reports at runtime.
+ */
+function checkModuleUndefinedHelpers() {
+  const helperNames = [
+    'normalizeBaseUrl',
+    'baseUrlOrigin',
+    'modelsEndpointCandidates',
+    'normalizeUrlKey',
+    'storageKey',
+    'isWordLikeNeedle',
+    'apiErrorKey',
+    'cloneDefaultSettings',
+    'truncate'
+  ];
+  moduleFiles().forEach((file) => {
+    const source = read(file);
+    const bound = new Set();
+    forEachImport(source, ({ defaultName, namespaceName, named }) => {
+      if (defaultName) bound.add(defaultName);
+      if (namespaceName) bound.add(namespaceName);
+      named.forEach((entry) => bound.add(entry.local));
+    });
+    const declared = /\b(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/g;
+    let match;
+    while ((match = declared.exec(source))) bound.add(match[1]);
+    const destructured = /\b(?:const|let|var)\s*\{([^}]*)\}\s*=/g;
+    while ((match = destructured.exec(source))) {
+      match[1].split(',').forEach((entry) => {
+        const name = entry.split(':').pop().trim();
+        if (name) bound.add(name);
+      });
+    }
+
+    helperNames.forEach((name) => {
+      if (!new RegExp(`\\b${name}\\s*\\(`).test(source)) return;
+      if (bound.has(name)) return;
+      if (new RegExp(`function[^(]*\\([^)]*\\b${name}\\b`).test(source)) return;
+      if (new RegExp(`\\([^)]*\\b${name}\\b[^)]*\\)\\s*=>`).test(source)) return;
+      fail(`${rel(file)}: calls ${name}() without importing or declaring it`);
+    });
+  });
+}
+
 /* --------------------------------------------------------------- shell scripts */
+
+/**
+ * Duplicate top level declarations break the whole file (Chrome refuses to
+ * register the service worker), and they are easy to introduce with search and
+ * replace edits. Function declarations are silent in classic scripts too, so
+ * they are checked in every file.
+ */
+function checkDuplicateDeclarations() {
+  walk(ROOT, (name) => name.endsWith('.js') || name.endsWith('.mjs')).forEach((file) => {
+    const source = read(file);
+    const lines = source.split('\n');
+    const seen = new Map();
+    // Only top level declarations collide: nested functions legitimately reuse
+    // names inside their own scope.
+    const functionPattern = /^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/;
+    const bindingPattern = /^(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/;
+    const isModule = /^\s*(import|export)\s/m.test(source);
+    lines.forEach((line, index) => {
+      if (/^\s/.test(line)) return;            // indented: not top level
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+      let found = null;
+      const fn = functionPattern.exec(line);
+      if (fn) found = { kind: 'function', name: fn[1] };
+      if (!found && isModule) {
+        const binding = bindingPattern.exec(line);
+        if (binding) found = { kind: 'binding', name: binding[1] };
+      }
+      if (!found) return;
+      const previous = seen.get(found.name);
+      if (previous && previous.kind === found.kind) {
+        fail(`${rel(file)}: ${found.kind} "${found.name}" is declared twice (lines ${previous.line} and ${index + 1})`);
+        return;
+      }
+      seen.set(found.name, { kind: found.kind, line: index + 1 });
+    });
+  });
+}
 
 function checkShellScripts() {
   const shFile = path.join(ROOT, 'deploy', 'deploy.sh');
@@ -621,6 +704,8 @@ function main() {
   checkLocales();
   checkI18nKeys();
   checkModuleImports();
+  checkModuleUndefinedHelpers();
+  checkDuplicateDeclarations();
   checkClassicVsModuleBoundaries();
   checkContentScriptOrder();
   checkCss();

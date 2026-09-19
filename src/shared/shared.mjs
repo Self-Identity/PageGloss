@@ -44,9 +44,10 @@ export const DEFAULT_SYSTEM_PROMPT = shared.DEFAULT_SYSTEM_PROMPT;
 export const DEFAULT_SYSTEM_PROMPT_EN = shared.DEFAULT_SYSTEM_PROMPT_EN;
 
 export const cloneDefaultSettings = shared.cloneDefaultSettings;
-export const normalizeBaseUrl = shared.normalizeBaseUrl;
+export const normalizeInputUrl = shared.normalizeInputUrl;
+export const chatEndpointCandidates = shared.chatEndpointCandidates;
 export const baseUrlOrigin = shared.baseUrlOrigin;
-export const modelsEndpoint = shared.modelsEndpoint;
+export const modelsEndpointCandidates = shared.modelsEndpointCandidates;
 export const truncate = shared.truncate;
 export const normalizeUrlKey = shared.normalizeUrlKey;
 export const storageKey = shared.storageKey;

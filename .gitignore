@@ -1,0 +1,13 @@
+# Build output (deploy staging directory, release zip, test reports)
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Editor and OS noise
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+*.swp

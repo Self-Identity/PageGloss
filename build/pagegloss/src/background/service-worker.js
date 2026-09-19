@@ -3,14 +3,19 @@
  * Owns the context menu, the OpenAI-compatible request pipeline and the
  * streaming bridge back to the content script.
  */
-import {
+import * as ns from '../shared/shared.mjs';
+
+const {
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_SYSTEM_PROMPT_EN,
   hasChinese,
   getSettings,
   saveSettings,
-  normalizeSettings
-} from '../shared/shared.mjs';
+  normalizeSettings,
+  normalizeInputUrl,
+  chatEndpointCandidates,
+  modelsEndpointCandidates
+} = ns;
 
 // Version banner: open chrome://extensions -> the extension's "Service worker"
 // console to confirm which build is actually running. If this line is missing
@@ -361,12 +366,37 @@ function classifyHttpError(status, bodyText) {
   return { code: 'http', status, detail };
 }
 
-async function performRequest(settings, payload, onToken, signal) {
-  const endpoint = settings.apiBaseUrl;
-  if (!endpoint) return { error: { code: 'no-config' } };
+async function performRequest(settings, payload, onToken, signal, onReasoning) {
+  if (!settings.apiBaseUrl) return { error: { code: 'no-config' } };
   if (!settings.apiKey) return { error: { code: 'no-key' } };
-  if (!(await ensureHostPermission(endpoint))) return { error: { code: 'permission' } };
 
+  // A bare origin cannot tell us whether the provider wants the /v1 segment
+  // (OpenAI) or not (DeepSeek), so try the candidates in order and only move on
+  // when the provider answers 404. Nothing is written back into settings.
+  const candidates = chatEndpointCandidates(settings.apiBaseUrl);
+  if (!candidates.length) return { error: { code: 'no-config' } };
+  if (!(await ensureHostPermission(candidates[0]))) return { error: { code: 'permission' } };
+
+  const attempts = [];
+  let result = null;
+  for (const endpoint of candidates) {
+    result = await requestOnce(settings, payload, onToken, signal, endpoint, onReasoning);
+    if (result.retryable) {
+      attempts.push({ url: endpoint, status: 404 });
+      continue;
+    }
+    result.attempts = attempts;
+    result.endpoint = endpoint;
+    return result;
+  }
+  return {
+    error: { code: 'endpoint-not-found', tried: candidates, detail: '' },
+    attempts
+  };
+}
+
+/** One request attempt against one endpoint. `retryable` marks a 404. */
+async function requestOnce(settings, payload, onToken, signal, endpoint, onReasoning) {
   const timeoutMs = Math.max(5000, Math.min(600000, Number(settings.requestTimeoutMs) || 60000));
   const controller = new AbortController();
   let timedOut = false;
@@ -418,6 +448,9 @@ async function performRequest(settings, payload, onToken, signal) {
   if (!response.ok) {
     cleanup();
     const text = await response.text().catch(() => '');
+    // A 404 means this candidate path is wrong for this provider: let the caller
+    // try the next one instead of failing the whole request.
+    if (response.status === 404) return { retryable: true };
     return { error: classifyHttpError(response.status, text) };
   }
 
@@ -431,15 +464,21 @@ async function performRequest(settings, payload, onToken, signal) {
       return { error: { code: 'network', detail: 'invalid JSON response' } };
     }
     cleanup();
-    const text = extractContent(parsed);
-    if (!text) return { error: { code: 'empty' } };
-    return { text };
+    const fragment = extractFragment(parsed);
+    if (!fragment.text) return emptyAnswerError(parsed);
+    if (fragment.reasoning) {
+      // Reasoning model that never reached the answer: keep the text, flag it.
+      return { text: fragment.text, reasoningOnly: true, finishReason: finishReasonOf(parsed) };
+    }
+    return { text: fragment.text };
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let full = '';
+  let reasoning = '';
+  let lastEmptyFrame = null;
 
   while (true) {
     let chunk;
@@ -467,47 +506,133 @@ async function performRequest(settings, payload, onToken, signal) {
       } catch (err) {
         continue;
       }
+      const reasoningDelta = extractReasoningDelta(parsed);
+      if (reasoningDelta) {
+        // Reasoning models stream their chain of thought first; keep it so the
+        // answer is not lost when the token budget ends before the content.
+        reasoning += reasoningDelta;
+        if (onReasoning) onReasoning(reasoningDelta);
+        continue;
+      }
       const delta = extractDelta(parsed);
       if (delta) {
         full += delta;
         onToken(delta);
+      } else if (!full) {
+        lastEmptyFrame = parsed;
       }
     }
   }
 
   cleanup();
-  if (!full) return { error: { code: 'empty' } };
+  if (!full) {
+    if (reasoning) {
+      // Hand back what the model did produce and let the UI warn about it.
+      return { text: reasoning, reasoningOnly: true, finishReason: finishReasonOf(lastEmptyFrame) };
+    }
+    return emptyAnswerError(lastEmptyFrame);
+  }
   return { text: full };
 }
 
-function extractDelta(parsed) {
-  if (!parsed) return '';
+/**
+ * A 200 response without any text usually means the provider answered with a
+ * different shape, or the token budget ran out while a reasoning model was still
+ * thinking: report what it actually said instead of a bare "empty".
+ */
+function emptyAnswerError(parsed) {
+  return { error: { code: 'empty', detail: describeEmptyAnswer(parsed) } };
+}
+
+function describeEmptyAnswer(parsed) {
+  if (!parsed || typeof parsed !== 'object') return '';
+  const choice = Array.isArray(parsed.choices) && parsed.choices.length ? parsed.choices[0] : null;
+  const message = choice ? (choice.message || choice.delta || null) : null;
+  const parts = [];
+  const reasoning = message ? readText(message.reasoning_content) || readText(message.reasoning) : '';
+  const finishReason = choice && choice.finish_reason ? String(choice.finish_reason) : '';
+
+  if (reasoning && finishReason === 'length') {
+    parts.push('reasoning_only_length');
+  } else if (reasoning) {
+    parts.push('reasoning_only');
+  }
+  if (finishReason) parts.push('finish_reason=' + finishReason);
+  if (message && typeof message.refusal === 'string' && message.refusal) {
+    parts.push('refusal=' + message.refusal.slice(0, 120));
+  }
+  if (parsed.error && (parsed.error.message || parsed.error.type)) {
+    parts.push(String(parsed.error.message || parsed.error.type).slice(0, 160));
+  }
+  if (!parts.length) {
+    const keys = Object.keys(parsed).slice(0, 6).join(',');
+    if (keys) parts.push('keys=' + keys);
+  }
+  return parts.join('|').slice(0, 300);
+}
+
+/** Machine readable reason extracted from that detail string. */
+function emptyAnswerReason(parsed) {
+  const detail = describeEmptyAnswer(parsed);
+  if (detail.indexOf('reasoning_only_length') >= 0) return 'reasoning-length';
+  if (detail.indexOf('reasoning_only') >= 0) return 'reasoning-only';
+  const match = /finish_reason=([a-z_]+)/i.exec(detail);
+  if (match) return 'finish-' + match[1];
+  return detail ? 'shape' : 'unknown';
+}
+
+/**
+ * Text fragment of a completion payload.
+ *
+ * Reasoning models (deepseek-reasoner, o-series, QwQ …) put their chain of
+ * thought in `reasoning_content` and only then fill `content`. When the token
+ * budget runs out during the reasoning phase, `content` stays empty and the
+ * whole answer is lost — so the reasoning text is used as a fallback and flagged
+ * so the caller can tell the user what happened.
+ */
+function extractFragment(parsed) {
+  if (!parsed) return { text: '', reasoning: false };
   const choices = parsed.choices;
   if (Array.isArray(choices) && choices.length) {
     const choice = choices[0];
-    if (choice.delta && typeof choice.delta.content === 'string') return choice.delta.content;
-    if (choice.delta && Array.isArray(choice.delta.content)) {
-      return choice.delta.content.map((part) => (part && part.text) || '').join('');
-    }
-    if (typeof choice.text === 'string') return choice.text;
+    const message = choice.message || choice.delta || {};
+    const content = readText(message.content);
+    if (content) return { text: content, reasoning: false };
+    const reasoning = readText(message.reasoning_content) || readText(message.reasoning);
+    if (reasoning) return { text: reasoning, reasoning: true };
+    if (typeof choice.text === 'string' && choice.text) return { text: choice.text, reasoning: false };
   }
-  if (typeof parsed.delta === 'string') return parsed.delta;
+  if (typeof parsed.delta === 'string' && parsed.delta) return { text: parsed.delta, reasoning: false };
+  if (typeof parsed.output_text === 'string' && parsed.output_text) return { text: parsed.output_text, reasoning: false };
+  return { text: '', reasoning: false };
+}
+
+/** Message content may be a string or an array of {type,text} parts. */
+function readText(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((part) => (part && part.text) || '').join('');
   return '';
 }
 
+function extractDelta(parsed) {
+  const fragment = extractFragment(parsed);
+  return fragment.reasoning ? '' : fragment.text;
+}
+
+/** Delta for the reasoning channel, streamed separately so it is not lost. */
+function extractReasoningDelta(parsed) {
+  const fragment = extractFragment(parsed);
+  return fragment.reasoning ? fragment.text : '';
+}
+
 function extractContent(parsed) {
-  if (!parsed) return '';
-  const choices = parsed.choices;
-  if (Array.isArray(choices) && choices.length) {
-    const choice = choices[0];
-    if (choice.message && typeof choice.message.content === 'string') return choice.message.content;
-    if (choice.message && Array.isArray(choice.message.content)) {
-      return choice.message.content.map((part) => (part && part.text) || '').join('');
-    }
-    if (typeof choice.text === 'string') return choice.text;
-  }
-  if (typeof parsed.output_text === 'string') return parsed.output_text;
-  return '';
+  return extractFragment(parsed).text;
+}
+
+function finishReasonOf(parsed) {
+  if (!parsed || !Array.isArray(parsed.choices) || !parsed.choices.length) return '';
+  const choice = parsed.choices[0];
+  return choice && choice.finish_reason ? String(choice.finish_reason) : '';
 }
 
 /* --------------------------------------------------------------- port bridge */
@@ -544,7 +669,11 @@ chrome.runtime.onConnect.addListener((port) => {
     const payload = message.payload || {};
     const result = await performRequest(settings, payload, (delta) => {
       post({ type: 'token', delta });
-    }, controller.signal);
+    }, controller.signal, (delta) => {
+      // Chain of thought: shown muted in the card so a truncated answer still
+      // carries whatever the model produced.
+      post({ type: 'reasoning', delta });
+    });
     if (result.aborted) {
       post({ type: 'error', code: 'aborted' });
       return;
@@ -553,7 +682,7 @@ chrome.runtime.onConnect.addListener((port) => {
       post(Object.assign({ type: 'error' }, result.error));
       return;
     }
-    post({ type: 'done', text: result.text });
+    post({ type: 'done', text: result.text, reasoningOnly: !!result.reasoningOnly, finishReason: result.finishReason || '' });
   });
 });
 
@@ -573,9 +702,10 @@ async function handleRequest(message, sender) {
   if (message.type === 'pg:testConnection') {
     const settings = normalizeSettings(Object.assign({}, await getSettings(), message.settings || {}, {
       stream: false,
-      // Keep the probe cheap and quick: a handful of tokens is enough to prove
-      // the endpoint, the key and the model all work.
-      maxTokens: Math.min(32, Number(message.settings && message.settings.maxTokens) || 32)
+      // Reasoning models spend the budget on their chain of thought first, so a
+      // tiny probe budget would look like a broken endpoint. Keep it small but
+      // large enough for a one line answer.
+      maxTokens: Math.max(256, Math.min(1024, Number((message.settings && message.settings.maxTokens) || 0)))
     }));
     if (!settings.apiBaseUrl) return { ok: false, code: 'no-config' };
     if (!settings.apiKey) return { ok: false, code: 'no-key' };
@@ -593,20 +723,53 @@ async function handleRequest(message, sender) {
     if (!settings.apiKey) return { ok: false, code: 'no-key' };
     const granted = await ensureHostPermission(settings.apiBaseUrl);
     if (!granted) return { ok: false, code: 'permission' };
-    const url = settings.apiBaseUrl.replace(/\/chat\/completions$/, '/models');
-    try {
-      const response = await fetch(url, {
-        headers: settings.apiKey ? { Authorization: 'Bearer ' + settings.apiKey } : {}
-      });
-      if (!response.ok) return { ok: false, code: 'http', status: response.status, detail: await response.text().catch(() => '') };
-      const parsed = await response.json();
+
+    // Providers disagree about where the model list lives: DeepSeek serves it at
+    // /models while its chat endpoint is /v1/chat/completions, OpenAI serves both
+    // under /v1. Try the likely candidates and report every URL on failure.
+    const candidates = modelsEndpointCandidates(settings.apiBaseUrl);
+    const attempts = [];
+    const headers = settings.apiKey ? { Authorization: 'Bearer ' + settings.apiKey } : {};
+    for (const candidate of candidates) {
+      let response;
+      try {
+        response = await fetch(candidate, { headers });
+      } catch (err) {
+        attempts.push({ url: candidate, error: String(err && err.message ? err.message : err) });
+        continue;
+      }
+      if (response.status === 404) {
+        attempts.push({ url: candidate, status: 404 });
+        continue;
+      }
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        return {
+          ok: false,
+          ...classifyHttpError(response.status, text),
+          attempts,
+          modelListUrl: candidate
+        };
+      }
+      let parsed;
+      try {
+        parsed = await response.json();
+      } catch (err) {
+        return { ok: false, code: 'network', detail: 'invalid JSON response', attempts, modelListUrl: candidate };
+      }
       const list = Array.isArray(parsed && parsed.data)
         ? parsed.data.map((item) => (typeof item === 'string' ? item : item && item.id)).filter(Boolean)
         : [];
-      return { ok: true, models: list };
-    } catch (err) {
-      return { ok: false, code: 'network', detail: String(err && err.message ? err.message : err) };
+      return { ok: true, models: list, modelListUrl: candidate, attempts };
     }
+    return {
+      ok: false,
+      code: 'models-unavailable',
+      status: 404,
+      detail: '',
+      attempts,
+      tried: candidates
+    };
   }
   if (message.type === 'pg:settingsSaved') {
     await queueMenuRebuild();

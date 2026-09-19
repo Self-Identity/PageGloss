@@ -83,6 +83,11 @@
     '.error { color: var(--pg-danger); background: var(--pg-danger-soft); border: 1px solid var(--pg-danger-border);',
     '  border-radius: 9px; padding: 8px 10px; margin: 0 0 10px; overflow-wrap: anywhere; }',
     '.error-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }',
+    '.reasoning { margin: 0 0 10px; padding: 7px 9px; border: 1px dashed var(--pg-border);',
+    '  border-radius: 8px; color: var(--pg-fg-dim); font-size: 12px; max-height: 160px; overflow-y: auto;',
+    '  overflow-wrap: anywhere; }',
+    '.reasoning .who { display: block; font-size: 10.5px; font-weight: 650; letter-spacing: .04em;',
+    '  text-transform: uppercase; margin-bottom: 3px; }',
     '.error-actions button { flex-shrink: 0; white-space: nowrap; }',
     '.foot { flex-shrink: 0; border-top: 1px solid var(--pg-border); padding: 8px; background: var(--pg-head); }',
     '.row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }',
@@ -265,6 +270,7 @@
     var streamHandle = null;
     var autoScroll = true;
     var drag = null;
+    var reasoningNode = null;
 
     // Cancel-mark menu: offers the two unmark scopes without leaving the card.
     var unmarkButton = card.querySelector('.unmark');
@@ -560,7 +566,7 @@
         head.style.cursor = pinned ? 'grab' : 'default';
       },
       isPinned: function () { return card.classList.contains('pinned'); },
-      clear: clearBody,
+      clear: function () { reasoningNode = null; clearBody(); },
       addUserMessage: addUserMessage,
       addAssistantMarkdown: function (raw) {
         var md = addAssistantBubble();
@@ -573,6 +579,25 @@
         el.className = 'msg';
         el.textContent = message;
         body.appendChild(el);
+        scrollToEnd();
+      },
+      /** Chain-of-thought output: shown muted, above the final answer. */
+      appendReasoning: function (text) {
+        if (!text) return;
+        if (!reasoningNode) {
+          reasoningNode = document.createElement('div');
+          reasoningNode.className = 'reasoning';
+          var who = document.createElement('span');
+          who.className = 'who';
+          who.textContent = t('cardReasoningLabel');
+          reasoningNode.appendChild(who);
+          var bodyText = document.createElement('span');
+          bodyText.className = 'reasoning-text';
+          reasoningNode.appendChild(bodyText);
+          body.appendChild(reasoningNode);
+        }
+        var target = reasoningNode.querySelector('.reasoning-text');
+        if (target) target.textContent += text;
         scrollToEnd();
       },
       addNoticeAction: function (message, label, onAction) {

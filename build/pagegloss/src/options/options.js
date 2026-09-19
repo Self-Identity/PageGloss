@@ -8,6 +8,8 @@
 
   var state = {
     settings: null,
+    models: [],
+    modelListUrl: '',
     i18n: null,
     saveTimer: 0,
     keyVisible: false
@@ -45,6 +47,9 @@
     el('toggleKey').title = t('optApiKey');
     el('modelLabel').textContent = t('optModel');
     el('fetchModels').textContent = t('optFetchModels');
+    if (state.settings && state.settings.model && el('modelToggle').hidden === false) {
+      el('modelToggle').textContent = t('optModelsToggle', { n: state.models.length });
+    }
     el('temperatureLabel').textContent = t('optTemperature');
     el('maxTokensLabel').textContent = t('optMaxTokens');
     el('streamLabel').textContent = t('optStream');
@@ -82,6 +87,7 @@
   function renderForm() {
     var settings = state.settings;
     el('baseUrl').value = settings.apiBaseUrl || '';
+    renderResolvedEndpoint();
     el('apiKey').value = settings.apiKey || '';
     el('apiKey').type = state.keyVisible ? 'text' : 'password';
     el('model').value = settings.model || '';
@@ -103,6 +109,21 @@
     loose: 'matchLooseHint',
     strict: 'matchStrictHint'
   };
+
+  /** Show which URL requests will actually hit, without rewriting the input. */
+  function renderResolvedEndpoint() {
+    const node = el('resolvedEndpoint');
+    const raw = el('baseUrl').value.trim();
+    if (!raw) {
+      node.hidden = false;
+      node.textContent = t('optResolvedPending');
+      return;
+    }
+    node.hidden = false;
+    const candidates = S.chatEndpointCandidates(raw);
+    node.textContent = t('optResolvedEndpoint', { s: candidates[0] || '' }) +
+      (candidates.length > 1 ? '\n' + t('optResolvedFallback', { s: candidates[1] }) : '');
+  }
 
   function renderMatchModes() {
     const inputs = document.querySelectorAll('#matchModes input[name="pg-match-mode"]');
@@ -156,14 +177,12 @@
 
   async function save(patch, options) {
     var opts = options || {};
+    // The typed address is stored verbatim; the request URL is completed per
+    // call, so no path is invented here and the text box never rewrites itself.
     var next = await Store.saveSettings(patch || collect());
     if (next.apiBaseUrl) {
       var grant = await ensureOriginPermission(next.apiBaseUrl);
-      next.apiBaseUrl = S.normalizeBaseUrl(next.apiBaseUrl);
-      next = await Store.saveSettings({ apiBaseUrl: next.apiBaseUrl });
-      if (!grant) {
-        UI.toast(t('errPermission'), { duration: 5200 });
-      }
+      if (!grant) UI.toast(t('errPermission'), { duration: 5200 });
     }
     state.settings = next;
     if (opts.render !== false) renderForm();
@@ -233,24 +252,91 @@
         }
         if (!response || !response.ok) {
           // Show the provider's own message plus an actionable hint instead of
-          // the bare error code.
-          UI.toast(t('optModelsFail', { s: apiErrorText(response || {}) }), { duration: 7000 });
+          // the bare error code, and list the URLs that were attempted.
+          UI.toast(t('optModelsFail', { s: UI.formatApiErrorDetail(response || {}, t, S.apiErrorKey) }), { duration: 9000 });
           return;
         }
-        var list = el('modelList');
-        list.textContent = '';
-        response.models.forEach(function (name) {
-          var option = document.createElement('option');
-          option.value = name;
-          list.appendChild(option);
-        });
-        if (!el('model').value && response.models.length) {
-          el('model').value = response.models[0];
-          scheduleSave();
-        }
-        UI.toast(t('optModelsOk', { n: response.models.length }));
+        renderModelList(response.models || [], response.modelListUrl || '');
       });
     });
+  }
+
+  /** Render every fetched model in a scrollable list (not a native datalist). */
+  function renderModelList(names, sourceUrl) {
+    const list = el('modelList');
+    const toggle = el('modelToggle');
+    const unique = [];
+    const seen = new Set();
+    names.forEach((name) => {
+      const value = String(name || '').trim();
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      unique.push(value);
+    });
+
+    state.models = unique;
+    state.modelListUrl = sourceUrl || '';
+    list.textContent = '';
+
+    if (!unique.length) {
+      toggle.hidden = true;
+      list.hidden = true;
+      UI.toast(t('optModelsEmpty'), { duration: 5200 });
+      return;
+    }
+
+    unique.forEach((name) => {
+      const item = document.createElement('li');
+      item.className = 'model-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', el('model').value === name ? 'true' : 'false');
+      const label = document.createElement('span');
+      label.className = 'name';
+      label.textContent = name;
+      label.title = name;
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = name === state.settings.model ? t('optModelCurrent') : '';
+      item.appendChild(label);
+      item.appendChild(tag);
+      item.addEventListener('click', function () {
+        el('model').value = name;
+        closeModelList();
+        renderModelList(state.models, state.modelListUrl);
+        scheduleSave();
+      });
+      list.appendChild(item);
+    });
+
+    toggle.hidden = false;
+    toggle.textContent = t('optModelsToggle', { n: unique.length });
+    toggle.setAttribute('aria-expanded', list.hidden ? 'false' : 'true');
+    if (sourceUrl) toggle.title = t('optModelsSource') + ' ' + sourceUrl;
+
+    // Auto-select the first model only when nothing is configured yet.
+    if (!el('model').value && unique.length) {
+      el('model').value = unique[0];
+      scheduleSave();
+    }
+    UI.toast(t('optModelsOk', { n: unique.length }), { duration: 3200 });
+  }
+
+  function closeModelList() {
+    const list = el('modelList');
+    if (!list) return;
+    list.hidden = true;
+    const toggle = el('modelToggle');
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleModelList() {
+    const list = el('modelList');
+    if (list.hidden) {
+      list.hidden = false;
+      el('modelToggle').setAttribute('aria-expanded', 'true');
+    } else {
+      closeModelList();
+    }
   }
 
   function exportData() {
@@ -306,6 +392,8 @@
       el(id).addEventListener('input', scheduleSave);
       el(id).addEventListener('change', scheduleSave);
     });
+    el('baseUrl').addEventListener('input', renderResolvedEndpoint);
+    el('baseUrl').addEventListener('change', renderResolvedEndpoint);
     ['stream', 'markSentenceTokens', 'cardHoverOpen'].forEach(function (id) {
       el(id).addEventListener('change', scheduleSave);
     });
@@ -338,6 +426,19 @@
       el('systemPrompt').value = defaultPrompt();
       el('systemPrompt').focus();
       scheduleSave();
+    });
+
+    el('modelToggle').addEventListener('click', function (event) {
+      event.stopPropagation();
+      toggleModelList();
+    });
+    document.addEventListener('click', function (event) {
+      const picker = document.querySelector('.model-picker');
+      if (picker && event.target && picker.contains(event.target)) return;
+      closeModelList();
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeModelList();
     });
 
     el('test').addEventListener('click', testConnection);

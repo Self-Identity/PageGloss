@@ -125,6 +125,7 @@ function loadServiceWorker(chrome, fetchImpl) {
     JSON,
     URL,
     TextDecoder,
+    TextEncoder,
     AbortController,
     setTimeout,
     clearTimeout
@@ -134,14 +135,16 @@ function loadServiceWorker(chrome, fetchImpl) {
   // The classic scripts run in order, exactly like the manifest content script list.
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'src/shared/messages.js'), 'utf8'), sandbox, { filename: 'messages.js' });
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'src/shared/storage.js'), 'utf8'), sandbox, { filename: 'storage.js' });
-  sandbox.__shared = sandbox.PageGlossShared;
-  sandbox.__store = sandbox.PageGlossStore;
-  if (!sandbox.__shared || !sandbox.__store) {
+  const shared = sandbox.PageGlossShared;
+  const store = sandbox.PageGlossStore;
+  if (!shared || !store) {
     throw new Error('shared classic scripts did not publish their globals');
   }
-  vm.runInContext('const { DEFAULT_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT_EN, hasChinese } = __shared;\n' +
-    'const { getSettings, saveSettings, normalizeSettings } = __store;\n' +
-    source, sandbox, { filename: 'service-worker.js' });
+
+  // Mirror the real module namespace as `ns` so the worker can be loaded without
+  // hand written destructuring (which used to introduce duplicate bindings).
+  sandbox.ns = Object.assign(Object.create(null), shared, store);
+  vm.runInContext(source, sandbox, { filename: 'service-worker.js' });
   return sandbox;
 }
 
@@ -322,7 +325,7 @@ async function main() {
     assert(userMessage.includes(EXPLAIN_PAYLOAD.context.pageText), 'page text included in page mode');
     assert(userMessage.includes('The flux capacitor makes time travel possible.'), 'sentence included');
     assert(userMessage.includes('“flux capacitor”是什么意思'), 'term question shape');
-    assertEqual(sandbox.__shared.CONTEXT_MODES.length, 3, 'three context modes exist');
+    assertEqual(sandbox.PageGlossShared.CONTEXT_MODES.length, 3, 'three context modes exist');
   });
 
   await test('section mode sends the section and excerpts instead of the page text', async () => {
@@ -607,6 +610,139 @@ async function main() {
     );
   });
 
+  await test('model list falls back to the origin /models when /v1/models 404s', async () => {
+    // DeepSeek shape: chat lives at /v1/chat/completions, the list at /models.
+    const chrome = createChromeStub();
+    seed(chrome, { apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions' });
+    const requested = [];
+    loadServiceWorker(chrome, async (url) => {
+      requested.push(url);
+      if (url === 'https://api.deepseek.com/models') {
+        return jsonResponse({ data: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }] });
+      }
+      return { ok: false, status: 404, body: null, json: async () => ({}), text: async () => 'not found' };
+    });
+    await waitFor(() => chrome.listeners.onMessage.length > 0);
+    const response = await new Promise((resolve) => {
+      chrome.listeners.onMessage[0]({ type: 'pg:listModels' }, {}, resolve);
+    });
+    assertEqual(response.ok, true, 'the fallback candidate succeeded');
+    assertEqual(response.models.join(','), 'deepseek-chat,deepseek-reasoner', 'models returned');
+    assertEqual(response.modelListUrl, 'https://api.deepseek.com/models', 'the working URL is reported');
+    assert(requested.indexOf('https://api.deepseek.com/v1/models') >= 0, 'the naive candidate was tried first');
+    assert(
+      requested.indexOf('https://api.deepseek.com/models') > requested.indexOf('https://api.deepseek.com/v1/models'),
+      'fallback order is correct'
+    );
+  });
+
+  await test('model list reports every attempted URL when none works', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions' });
+    loadServiceWorker(chrome, async () => ({
+      ok: false,
+      status: 404,
+      body: null,
+      json: async () => ({}),
+      text: async () => 'not found'
+    }));
+    await waitFor(() => chrome.listeners.onMessage.length > 0);
+    const response = await new Promise((resolve) => {
+      chrome.listeners.onMessage[0]({ type: 'pg:listModels' }, {}, resolve);
+    });
+    assertEqual(response.ok, false, 'reported as failed');
+    assertEqual(response.code, 'models-unavailable', 'a dedicated code instead of a bare http 404');
+    assert(response.tried.length >= 2, 'candidate URLs reported: ' + JSON.stringify(response.tried));
+    assert(response.tried.indexOf('https://api.deepseek.com/models') >= 0, 'origin fallback included');
+  });
+
+  await test('model list keeps an auth error instead of trying more URLs', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { apiBaseUrl: 'https://api.deepseek.com/v1/chat/completions' });
+    let calls = 0;
+    loadServiceWorker(chrome, async () => {
+      calls++;
+      return {
+        ok: false,
+        status: 401,
+        body: null,
+        json: async () => ({}),
+        text: async () => JSON.stringify({ error: { message: 'Authentication Fails' } })
+      };
+    });
+    await waitFor(() => chrome.listeners.onMessage.length > 0);
+    const response = await new Promise((resolve) => {
+      chrome.listeners.onMessage[0]({ type: 'pg:listModels' }, {}, resolve);
+    });
+    assertEqual(response.ok, false, 'rejected');
+    assertEqual(response.code, 'http', 'auth failures stay http errors');
+    assertEqual(response.status, 401, 'status forwarded');
+    assertEqual(calls, 1, 'a 401 is not retried against more URLs');
+  });
+
+  await test('the chat URL is completed per request without rewriting the stored input', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { apiBaseUrl: 'https://api.deepseek.com' });
+    const requested = [];
+    loadServiceWorker(chrome, async (url) => {
+      requested.push(url);
+      // DeepSeek 404s on /v1/chat/completions and serves /chat/completions.
+      if (url.endsWith('/v1/chat/completions')) {
+        return { ok: false, status: 404, body: null, json: async () => ({}), text: async () => 'not found' };
+      }
+      return sseResponse([sseChunk('ok'), 'data: [DONE]\n\n']);
+    });
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'done'));
+    assertEqual(requested[0], 'https://api.deepseek.com/v1/chat/completions', 'the /v1 candidate is tried first');
+    assertEqual(requested[1], 'https://api.deepseek.com/chat/completions', 'the 404 falls back to the direct path');
+    assert(port.messages.some((message) => message.type === 'done'), 'the fallback produced an answer');
+    assertEqual(
+      chrome.storageData.get('pg:settings').apiBaseUrl,
+      'https://api.deepseek.com',
+      'the stored value stays exactly as typed'
+    );
+  });
+
+  await test('a bare origin still gets the OpenAI style /v1 path', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { apiBaseUrl: 'https://api.openai.com' });
+    const requested = [];
+    loadServiceWorker(chrome, async (url) => {
+      requested.push(url);
+      return sseResponse([sseChunk('ok'), 'data: [DONE]\n\n']);
+    });
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'done'));
+    assertEqual(requested[0], 'https://api.openai.com/v1/chat/completions', 'OpenAI style completion');
+  });
+
+  await test('explicit paths and local servers are respected', async () => {
+    const cases = [
+      ['https://api.deepseek.com/v1', 'https://api.deepseek.com/v1/chat/completions'],
+      ['https://api.deepseek.com/v1/chat/completions', 'https://api.deepseek.com/v1/chat/completions'],
+      ['http://localhost:11434/v1', 'http://localhost:11434/v1/chat/completions'],
+      ['https://openrouter.ai/api', 'https://openrouter.ai/api/chat/completions']
+    ];
+    for (const entry of cases) {
+      const input = entry[0];
+      const expected = entry[1];
+      const chrome = createChromeStub();
+      seed(chrome, { apiBaseUrl: input });
+      const requested = [];
+      loadServiceWorker(chrome, async (url) => {
+        requested.push(url);
+        return sseResponse([sseChunk('ok'), 'data: [DONE]\n\n']);
+      });
+      await waitFor(() => chrome.listeners.onConnect.length > 0);
+      const port = startPort(chrome, EXPLAIN_PAYLOAD);
+      await waitFor(() => port.messages.some((message) => message.type === 'done'));
+      assertEqual(requested[0], expected, 'input: ' + input);
+    }
+  });
+
   await test('model list requests hit the models endpoint', async () => {
     const chrome = createChromeStub();
     seed(chrome);
@@ -621,7 +757,95 @@ async function main() {
       assertEqual(keepAlive, true, 'async response channel kept open');
     });
     assertEqual(requestedUrl, 'https://api.example.com/v1/models', 'models endpoint derived from the chat URL');
-    assertEqual(response.models.join(','), 'model-a,model-b', 'model ids returned');
+    assertEqual(response.models.length, 2, 'both models reach the caller, not just the first one');
+    assertEqual(response.models.join(','), 'model-a,model-b', 'model ids returned in order');
+  });
+
+  await test('an empty answer reports what the provider actually said', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { stream: false });
+    loadServiceWorker(chrome, async () => jsonResponse({
+      id: 'chatcmpl-1',
+      choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'length' }]
+    }));
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'error'));
+    const error = port.messages.find((message) => message.type === 'error');
+    assertEqual(error.code, 'empty', 'empty answer code');
+    assert(
+      String(error.detail).indexOf('finish_reason=length') >= 0,
+      'the finish reason is passed through: ' + error.detail
+    );
+  });
+
+  await test('an empty streaming answer also carries diagnostics', async () => {
+    const chrome = createChromeStub();
+    seed(chrome);
+    loadServiceWorker(chrome, async () => sseResponse([
+      'data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'content_filter' }] }) + '\n\n',
+      'data: [DONE]\n\n'
+    ]));
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'error'));
+    const error = port.messages.find((message) => message.type === 'error');
+    assertEqual(error.code, 'empty', 'empty answer code');
+    assert(
+      String(error.detail).indexOf('content_filter') >= 0,
+      'the streamed finish reason is reported: ' + error.detail
+    );
+  });
+
+  await test('a reasoning-only answer is still delivered with a warning', async () => {
+    const chrome = createChromeStub();
+    seed(chrome);
+    loadServiceWorker(chrome, async () => sseResponse([
+      'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '先分析语境' } }] }) + '\n\n',
+      'data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'length' }] }) + '\n\n',
+      'data: [DONE]\n\n'
+    ]));
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'done'));
+    const reasoning = port.messages.filter((message) => message.type === 'reasoning').map((m) => m.delta).join('');
+    assertEqual(reasoning, '先分析语境', 'the chain of thought is streamed on its own channel');
+    const done = port.messages.find((message) => message.type === 'done');
+    assertEqual(done.text, '先分析语境', 'the reasoning text is handed back instead of an empty answer');
+    assertEqual(done.reasoningOnly, true, 'flagged so the UI can explain it');
+    assertEqual(done.finishReason, 'length', 'the finish reason is forwarded');
+  });
+
+  await test('a normal answer is not flagged as reasoning only', async () => {
+    const chrome = createChromeStub();
+    seed(chrome);
+    loadServiceWorker(chrome, async () => sseResponse([
+      'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '思考' } }] }) + '\n\n',
+      'data: ' + JSON.stringify({ choices: [{ delta: { content: '答案' } }] }) + '\n\n',
+      'data: [DONE]\n\n'
+    ]));
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'done'));
+    const done = port.messages.find((message) => message.type === 'done');
+    assertEqual(done.text, '答案', 'only the answer text is returned');
+    assertEqual(done.reasoningOnly, false, 'not flagged');
+    const reasoning = port.messages.filter((message) => message.type === 'reasoning').map((m) => m.delta).join('');
+    assertEqual(reasoning, '思考', 'the reasoning channel still carries the chain of thought');
+  });
+
+  await test('a non-streaming reasoning-only reply is unpacked', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { stream: false });
+    loadServiceWorker(chrome, async () => jsonResponse({
+      choices: [{ message: { role: 'assistant', content: '', reasoning_content: '推理全文' }, finish_reason: 'length' }]
+    }));
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'done'));
+    const done = port.messages.find((message) => message.type === 'done');
+    assertEqual(done.text, '推理全文', 'reasoning_content is used as the answer');
+    assertEqual(done.reasoningOnly, true, 'flagged');
   });
 
   const failed = results.filter((item) => !item.ok);

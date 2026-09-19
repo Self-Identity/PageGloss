@@ -23,6 +23,14 @@
     return text;
   }
 
+  /** Same sentence plus the URLs that were attempted, for the details area. */
+  function formatApiErrorDetail(message, t, describe) {
+    var text = formatApiError(message, t, describe);
+    var tried = message && Array.isArray(message.tried) ? message.tried : [];
+    if (tried.length) text += '\n' + t('optTriedUrls', { s: tried.join('\n') });
+    return text;
+  }
+
   function ensureRoot() {
     if (root && root.isConnected) return root;
     root = document.createElement('div');
@@ -88,6 +96,7 @@
   window.PageGlossUI = {
     toast: show,
     destroyAll: destroyAll,
-    formatApiError: formatApiError
+    formatApiError: formatApiError,
+    formatApiErrorDetail: formatApiErrorDetail
   };
 })();

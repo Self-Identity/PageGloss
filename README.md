@@ -34,11 +34,46 @@ bash deploy/deploy.sh          # Windows 也可直接双击 deploy\deploy.bat
 
 | 配置项 | 说明 |
 | --- | --- |
-| 接口地址 | 填服务根地址或完整路径都行，保存时自动补 `/v1/chat/completions`。例：`https://api.deepseek.com`、`https://api.openai.com/v1`、`http://localhost:11434/v1` |
+| 接口地址 | 按服务商文档原样填写，例如 OpenAI 用 `https://api.openai.com/v1`、DeepSeek 用 `https://api.deepseek.com`。**保存时不会改写你填的内容**，调用时才补全到具体接口，下方会实时显示实际请求地址 |
 | API Key | 仅存本机，只会发给你填的接口地址 |
-| 模型名称 | 可点「拉取模型列表」从 `/models` 自动获取 |
+| 模型名称 | 可点「拉取模型列表」从 `/models` 自动获取（结果以可滚动列表展示全部模型，可点选）；服务商没有该接口时手动填写即可（见下） |
 | 温度 / 回答长度上限 | 默认 `0.3` / `900` |
 | 流式输出 | 默认开，边生成边显示 |
+
+### 接口地址怎么填（各家不一样）
+
+`/v1` 这一段**不是所有服务商都有**，这也是最容易踩的坑：
+
+| 服务商 | 建议填写 | 实际请求地址 |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | `https://api.openai.com/v1/chat/completions` |
+| DeepSeek | `https://api.deepseek.com` | `https://api.deepseek.com/chat/completions`（**没有 `/v1`**） |
+| Ollama / LM Studio | `http://localhost:11434/v1` | `http://localhost:11434/v1/chat/completions` |
+| 中转站 | `https://xxx/v1` 或对方给的完整路径 | 按你填的路径拼 `/chat/completions` |
+
+只填裸域名（如 `https://api.deepseek.com`）时，PageGloss 会先试 `/v1/chat/completions`，**如果返回 404 就自动改用 `/chat/completions`** —— 所以你不用猜，两种填法都能连通。填了具体路径（`/v1`、`/api`、甚至完整 `/chat/completions`）则完全按你填的走。
+
+> 为什么文档写 `base_url: https://api.deepseek.com`，却看不到 `/chat/completions`？
+> 因为 SDK 会自己拼：DeepSeek 的 `base_url` 指向 `https://api.deepseek.com`，OpenAI 官方 SDK 会自动追加 `/chat/completions`（它把 base 当成"服务器根 + 版本前缀"）。所以每家文档给的 `base_url` 与最终 URL 的对应关系并不统一：OpenAI 的 base 含 `/v1`，DeepSeek 的不含。PageGloss 里你只需要照抄文档给的 `base_url`，剩下的拼接由插件在调用时完成。
+
+### 关于推理模型（deepseek-reasoner、o 系列、QwQ 等）
+
+推理模型会先输出一大段**思维链**（`reasoning_content`），再输出正式答案（`content`）。如果「回答长度上限」太小，预算会被思维链吃光，`content` 就是空的 —— 表现为「模型没有返回内容」。
+
+PageGloss 的处理：
+
+- 思维链单独走一条通道，在注释卡片里以**灰底虚线框**（标注「推理过程」）展示，不混进正式答案
+- 如果预算被推理吃光（`finish_reason=length`），不会丢掉结果：把已产出的内容交回，并提示**调大「回答长度上限」（例如 2000）或改用 `deepseek-chat` 这类非推理模型**
+- 「测试连接」的探测请求会预留至少 256 tokens，避免把推理模型误判成接口不通
+
+**关于「拉取模型列表」**：各家的列表端点同样不统一，PageGloss 会按可能性依次尝试并在失败时报出试过的地址：
+
+```
+https://api.example.com/v1/models    ← 常见形式
+https://api.example.com/models       ← 去掉 /v1 的回退（DeepSeek 属于这种）
+```
+
+拉到的模型会以**可滚动列表**展示（含总数与来源地址），点任意一项即可选中，也可以直接在输入框里手写。如果所有候选都 404，提示会说明「该服务没有提供模型列表接口」并列出试过的地址 —— **拉列表失败不影响聊天功能**。遇到 401/403 会立即停止重试并提示密钥问题。
 
 任何 OpenAI 兼容服务都能用（OpenAI、DeepSeek、月之暗面、通义、硅基流动、各类中转站、Ollama、LM Studio、vLLM…）。保存时浏览器会请求访问该接口地址的权限，这是 MV3 的要求。
 
@@ -238,8 +273,11 @@ src/shared/messages.js  →  src/shared/i18n.js  →  src/shared/storage.js
 | --- | --- |
 | 未配置接口地址 / API Key / 模型 | 打开页面时弹出轻提示（带【去设置】按钮），标注后卡片内同样提示并可重试 |
 | API Key 无效或无权限（401/403） | 显示服务商返回的原文，并追加「API Key 可能无效或没有该模型的权限」 |
-| 拉取模型列表失败 | 显示服务商原文 + 对应提示（缺 Key、401、404、429、5xx 分别有不同说明），不再只显示 `http` |
-| 接口地址写错（404） | 提示确认服务商是否需要 `/v1` 路径 |
+| 拉取模型列表失败（404） | 提示该服务没有模型列表接口，列出试过的地址，并说明可直接手动填模型名；**不影响聊天** |
+| 拉取模型列表失败（401/403） | 显示服务商原文 + 密钥提示，且不再重试其他地址 |
+| 接口地址写错 / 该服务需要或不需要 `/v1` | 自动换用另一个候选地址（都 404 时报出试过的全部地址） |
+| 模型没有返回内容（200 但正文为空） | 区分原因给建议：被长度上限截断 / 推理占用全部预算（`finish_reason=length`）/ 内容过滤 / 仅返回推理内容 / 响应结构无法识别 |
+| 推理模型只输出思维链 | 思维链在卡片内独立展示，并提示调大「回答长度上限」或换用非推理模型 |
 | 模型名不存在或参数不支持（400） | 提示模型名可能写错 |
 | 限流 / 额度不足（429）、服务端 5xx | 分别提示稍后重试 |
 | 请求超时 | 按设置页的「请求超时」截断，提示已等待多少秒 |
