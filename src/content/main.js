@@ -405,7 +405,13 @@
     var range = selection.getRangeAt(0);
     var node = range.startContainer;
     var element = node && node.nodeType === 1 ? node : (node ? node.parentElement : null);
-    if (!element || (element.closest && (element.closest('pagegloss-ui') || element.closest(MARK_TAG)))) return null;
+    if (!element) return null;
+    // Selections inside our own shadow roots must not spawn the page button.
+    try {
+      var root = element.getRootNode ? element.getRootNode() : null;
+      if (root && root.host && root.host.tagName === 'PAGEGLOSS-UI') return null;
+    } catch (err) { /* ignore */ }
+    if (element.closest && (element.closest('pagegloss-ui') || element.closest(MARK_TAG))) return null;
     if (isEditableTarget(element)) return null;
     var rect = range.getBoundingClientRect ? range.getBoundingClientRect() : null;
     if ((!rect || (!rect.width && !rect.height)) && range.getClientRects) {
@@ -1110,6 +1116,8 @@
       var pendingHandle = { abort: function () {} };
       whenSettings().then(function () {
         if (!state.settings) return;
+        // The card may have been closed while the settings were loading.
+        if (!state.note || state.note.card !== card) return;
         var next = requestExplanation(annotation, card, options);
         if (next && typeof next.abort === 'function') pendingHandle.abort = next.abort;
       });
@@ -1522,14 +1530,24 @@
 
   /** Clear every annotation of this page, without asking. */
   function clearPageNow() {
+    // Cancel pending debounced writes first: they would otherwise recreate the
+    // storage key right after Store.clearPage() removed it.
+    if (saveTimer) {
+      window.clearTimeout(saveTimer);
+      saveTimer = 0;
+    }
+    if (pageSaveTimer) {
+      window.clearTimeout(pageSaveTimer);
+      pageSaveTimer = 0;
+    }
     M.unwrapAnnotations(null);
     state.annotations = [];
     state.threads = {};
-    closeNote(false);
     if (state.page) {
       state.page.annotations = [];
       state.page.chats = {};
     }
+    closeNote(false);
     return Store.clearPage(state.urlKey).then(function () {
       showToast(t('toastCleared'));
       return true;
@@ -1662,11 +1680,22 @@
     return false;
   }
 
+  function isInsideConfirmHost(event) {
+    var path = event.composedPath ? event.composedPath() : [];
+    for (var i = 0; i < path.length; i++) {
+      var node = path[i];
+      if (node && node.nodeType === 1 && node.id === 'pagegloss-confirm-host') return true;
+    }
+    return false;
+  }
+
   /** An unpinned card closes when the page outside it is pressed. */
   function closeOnOutside(event) {
     if (!state.note) return;
     if (state.note.card.isPinned()) return;
     if (isInsideCardHost(event)) return;
+    // Interacting with the clear-confirmation must not dismiss the card behind it.
+    if (isInsideConfirmHost(event)) return;
     // Pressing a <pagegloss-mark> is not "outside": the click handler owns it.
     if (targetFromPoint(event.target)) return;
     closeNote(true);

@@ -198,6 +198,7 @@
   function load() {
     var token = ++state.loadToken;
     state.loading = true;
+    closeOverlay();
     setRefreshBusy(true);
     Store.getAllPages().then(function (pages) {
       if (token !== state.loadToken) return;

@@ -126,6 +126,22 @@
       min-height: 1em;
     }
 
+    .caveat {
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+      font-size: .95em;
+      color: var(--fg);
+      overflow-wrap: anywhere;
+    }
+
     pre {
       margin: 16px 0 0;
       padding: 12px 14px;
@@ -167,6 +183,10 @@
       5 × 10 的标注矩阵分页，以及悬停解释 / 笔记浮层。写入的是普通数据，不带任何 demo 字段。
     </p>
     <p>写入后可打开 <a href="../src/data/data.html" target="_blank" rel="noopener">src/data/data.html</a> 查看效果。</p>
+    <p class="caveat">
+      注意：MV3 扩展页面的默认 CSP 是 <code>script-src 'self'</code>，会拦截本页的内联脚本。
+      若按钮没有反应，请在 DevTools 控制台里运行本页脚本，或使用放宽了 CSP 的开发副本。
+    </p>
     <p class="current" id="current">正在读取当前缓存…</p>
 
     <div class="buttons">
@@ -464,15 +484,29 @@
           var beforeIndex = before && before[S.STORAGE_INDEX_KEY] ? before[S.STORAGE_INDEX_KEY] : {};
           var beforePages = Object.keys(beforeIndex).length;
           var pages = buildPages();
-          for (var i = 0; i < pages.length; i++) {
-            await Store.savePage(pages[i]);
+          // savePage stamps updatedAt with "now", so save in reverse: the demo
+          // site and its 60-annotation page end up first in the data page.
+          var saveOrder = pages.slice().reverse();
+          for (var i = 0; i < saveOrder.length; i++) {
+            await Store.savePage(saveOrder[i]);
             await sleep(12);
           }
           var annotations = countAnnotations(pages);
+          var pagesBySite = Object.create(null);
+          var maxPageSize = 0;
+          pages.forEach(function (page) {
+            var groupKey = S.siteGroupOf(page.url);
+            pagesBySite[groupKey] = (pagesBySite[groupKey] || 0) + 1;
+            if (page.annotations.length > maxPageSize) maxPageSize = page.annotations.length;
+          });
+          var maxSitePages = 0;
+          Object.keys(pagesBySite).forEach(function (key) {
+            if (pagesBySite[key] > maxSitePages) maxSitePages = pagesBySite[key];
+          });
           report([
             '写入完成。',
             '站点：' + countSites(pages) + ' · 页面：' + pages.length + ' · 标注：' + annotations,
-            '覆盖：1 个站点 ' + 12 + ' 个页面（标题每页 10 行 · 需要翻页）、1 个页面 60 条标注（矩阵 5 × 10 · 需要翻页）、',
+            '覆盖：1 个站点 ' + maxSitePages + ' 个页面（标题每页 10 行 · 需要翻页）、1 个页面 ' + maxPageSize + ' 条标注（矩阵 5 × 10 · 需要翻页）、',
             '      带笔记 / 无笔记 / 长文本 / 中英混排 / explanation 为空但有 assistant 对话（浮层回退）。',
             '写入前的索引：' + beforePages + ' 个页面。'
           ], false);
