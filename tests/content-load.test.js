@@ -525,20 +525,40 @@ async function main() {
     assertEqual(env.sandbox.window.__pagegloss.state.urlKey, 'https://www.metal-archives.com/bands/Test/123', 'url key normalised');
   });
 
-  await test('missing API key raises a toast that points at the settings page', async () => {
+  await test('opening a page with no configuration does not nag the user', async () => {
     const env = loadContentScriptStack(manifestFiles);
     await waitFor(() => env.sandbox.window.__pagegloss && env.sandbox.window.__pagegloss.state.settings);
-    const notice = await waitFor(() => {
-      const host = allElements(env.document.body).find((node) => node.tagName === 'PAGEGLOSS-UI');
-      return host ? shadowText(host) : '';
+    // Give any deferred boot work a moment, then assert nothing was announced.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const notice = shadowText(env.document.body);
+    assert(
+      !/未配置 LLM/.test(notice),
+      'no startup nag: ' + notice.slice(0, 120)
+    );
+  });
+
+  await test('using the feature without an API key raises the notice', async () => {
+    const env = loadContentScriptStack(manifestFiles);
+    await waitFor(() => env.sandbox.window.__pagegloss && env.sandbox.window.__pagegloss.state.settings);
+    const MM = env.sandbox.window.PageGlossMatcher;
+    const originalApply = MM.applyRanges;
+    MM.applyRanges = function (map, ranges) {
+      originalApply(map, ranges);
+      return ranges.length;
+    };
+    env.sandbox.window.__pagegloss.mark({
+      text: 'PageGloss content load test.',
+      anchorElement: env.document.body.childNodes[0],
+      sentence: 'PageGloss content load test.'
     });
-    assert(/未配置 LLM/.test(notice), 'toast should mention the missing configuration, got: ' + notice);
+    const notice = await waitFor(() => {
+      const text = shadowText(env.document.body);
+      return /未配置 LLM/.test(text) ? text : '';
+    });
+    assert(/未配置 LLM/.test(notice), 'the notice appears on use, got: ' + notice.slice(0, 160));
     assert(/API Key/.test(notice), 'toast should name the missing field, got: ' + notice);
-    // The action button must exist so the user can jump to the settings page.
     const host = allElements(env.document.body).find((node) => node.tagName === 'PAGEGLOSS-UI');
-    const button = allElements(host).find((node) => node.tagName === 'BUTTON');
-    assert(button, 'toast should offer a settings shortcut');
-    assertEqual(button.textContent, '去设置', 'button label');
+    assert(host, 'a toast host exists');
   });
 
   await test('marking without an API key still marks and explains why', async () => {

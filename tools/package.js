@@ -16,9 +16,20 @@ const BUILD_DIR = path.join(ROOT, 'build');
 const INCLUDE_DIRS = ['src', 'icons', '_locales', 'docs'];
 const INCLUDE_FILES = ['manifest.json'];
 
+// dev/ holds development-only helpers (for example the demo data seeder). It is
+// never shipped: the published package must not contain demo annotations or any
+// other test scaffolding.
+const EXCLUDED_DIRS = ['dev', 'build', 'tests', 'tools'];
+
+function isExcluded(full) {
+  const relative = path.relative(ROOT, full).replace(/\\/g, '/');
+  return EXCLUDED_DIRS.some((dir) => relative === dir || relative.indexOf(dir + '/') === 0);
+}
+
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
+    if (isExcluded(full)) continue;
     if (entry.isDirectory()) walk(full, out);
     else out.push(full);
   }

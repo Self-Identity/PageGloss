@@ -21,7 +21,7 @@ const {
 // console to confirm which build is actually running. If this line is missing
 // after a reload, Chrome is still serving a stale registration or an older
 // unpacked folder.
-const BUILD_VERSION = '1.0.0';
+const BUILD_VERSION = '1.1.0';
 console.info('[PageGloss] service worker ' + BUILD_VERSION + ' loaded (modules: shared.mjs)');
 
 const MENU_IDS = {
@@ -694,6 +694,20 @@ async function handleRequest(message, sender) {
     try {
       if (chrome.runtime.openOptionsPage) chrome.runtime.openOptionsPage();
       else chrome.tabs.create({ url: chrome.runtime.getURL('src/options/options.html') });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, code: 'network', detail: String(err && err.message ? err.message : err) };
+    }
+  }
+  if (message.type === 'pg:openFullpage') {
+    // The content script cannot create tabs, so it asks here.
+    try {
+      const key = String(message.urlKey || '');
+      const id = String(message.annotationId || '');
+      if (!key || !id) return { ok: false, code: 'no-config', detail: 'missing annotation' };
+      const url = chrome.runtime.getURL('src/fullpage/fullpage.html') +
+        '?key=' + encodeURIComponent(key) + '&id=' + encodeURIComponent(id);
+      await chrome.tabs.create({ url });
       return { ok: true };
     } catch (err) {
       return { ok: false, code: 'network', detail: String(err && err.message ? err.message : err) };

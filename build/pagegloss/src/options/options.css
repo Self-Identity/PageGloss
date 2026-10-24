@@ -334,6 +334,17 @@ textarea:focus {
   font-weight: 550;
 }
 
+.btn.primary {
+  color: #fff;
+  background: var(--pg-accent);
+  border-color: var(--pg-accent);
+}
+
+.btn.primary:hover {
+  filter: brightness(1.06);
+  background: var(--pg-accent);
+}
+
 .btn.danger {
   color: var(--pg-danger);
   border-color: var(--pg-danger-border);
@@ -360,6 +371,31 @@ textarea:focus {
   .topbar-actions {
     width: 100%;
     justify-content: space-between;
+  }
+}
+
+/*
+ * Wide screens: two columns with the data card directly under the context
+ * strategy card, so the data tools read as a continuation of that section.
+ */
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #apiCard {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  #contextCard {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  #dataCard {
+    grid-column: 2;
+    grid-row: 2;
   }
 }
 

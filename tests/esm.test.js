@@ -20,8 +20,13 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+const os = require('os');
+const { pathToFileURL } = require('url');
 const ROOT = path.join(__dirname, '..');
-const FIXTURES = path.join(__dirname, 'fixtures');
+// Sandboxes may deny writes inside the repository, but the session temp area is
+// writable, so fixtures and the JSON report live there.
+const TMP = path.join(os.tmpdir(), 'pagegloss-esm');
+const FIXTURES = path.join(TMP, 'fixtures');
 // The child process runs with cwd = repository root, so entry points are passed
 // as plain relative paths. Absolute Windows paths would be read as the "F:" URL
 // scheme by Node, and file:// URLs are not accepted as script arguments either.
@@ -42,11 +47,11 @@ function runNode(args) {
 
 /** Run the probe and read its JSON report (via file, since piped stdio may be blocked). */
 function runProbe(entry) {
-  const reportPath = path.join(ROOT, 'build', 'esm-report.json');
+  const reportPath = path.join(TMP, 'esm-report.json');
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
   try { fs.unlinkSync(reportPath); } catch (err) { /* not there yet */ }
 
-  const result = runNode([...CHROME_FLAGS, PROBE, '--entry', entry, '--out', 'build/esm-report.json']);
+  const result = runNode([...CHROME_FLAGS, PROBE, '--entry', entry, '--out', reportPath]);
   let payload = null;
   if (fs.existsSync(reportPath)) {
     try {
@@ -89,10 +94,11 @@ function assertEqual(actual, expected, message) {
 
 function ensureFixtures() {
   fs.mkdirSync(FIXTURES, { recursive: true });
+  const toUrl = (file) => pathToFileURL(path.join(ROOT, file)).href;
   // The exact mistake from the bug report: a named import of a classic script.
   fs.writeFileSync(path.join(FIXTURES, 'imports.classic-as-module.mjs'), [
     '// Fixture: reproduces the reported Chrome error.',
-    "import { DEFAULT_SYSTEM_PROMPT } from '../../src/shared/messages.js';",
+    "import { DEFAULT_SYSTEM_PROMPT } from '" + toUrl('src/shared/messages.js') + "';",
     'export default DEFAULT_SYSTEM_PROMPT;',
     ''
   ].join('\n'));
@@ -100,7 +106,7 @@ function ensureFixtures() {
   // A named import that simply does not exist in a real module.
   fs.writeFileSync(path.join(FIXTURES, 'imports.missing-export.mjs'), [
     '// Fixture: named import that the target module does not export.',
-    "import { notARealExport } from '../../src/shared/shared.mjs';",
+    "import { notARealExport } from '" + toUrl('src/shared/shared.mjs') + "';",
     'export default notARealExport;',
     ''
   ].join('\n'));
@@ -108,7 +114,7 @@ function ensureFixtures() {
   // The real entry point, imported exactly as Chrome does.
   fs.writeFileSync(path.join(FIXTURES, 'imports.ok.mjs'), [
     '// Fixture: the real service worker entry point.',
-    "import '../../src/background/service-worker.js';",
+    "import '" + toUrl('src/background/service-worker.js') + "';",
     ''
   ].join('\n'));
 }
@@ -139,12 +145,12 @@ function main() {
   });
 
   test('fixture: importing a classic script as a module is rejected', () => {
-    const result = runFixture('tests/fixtures/imports.classic-as-module.mjs');
+    const result = runFixture(path.join(FIXTURES, 'imports.classic-as-module.mjs'));
     assert(result.status !== 0, 'the classic-script import must fail');
   });
 
   test('fixture: a missing named export is rejected', () => {
-    const result = runFixture('tests/fixtures/imports.missing-export.mjs');
+    const result = runFixture(path.join(FIXTURES, 'imports.missing-export.mjs'));
     assert(result.status !== 0, 'the missing export must fail');
   });
 

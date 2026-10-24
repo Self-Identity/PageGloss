@@ -55,6 +55,7 @@ export const hasChinese = shared.hasChinese;
 export const cssEscape = shared.cssEscape;
 export const uuid = shared.uuid;
 export const isWordLikeNeedle = shared.isWordLikeNeedle;
+export const siteGroupOf = shared.siteGroupOf;
 export const apiErrorKey = shared.apiErrorKey;
 
 export const get = store.get;
@@ -73,6 +74,9 @@ export const liveAnchors = store.liveAnchors;
 export const anchorKey = store.anchorKey;
 export const getThread = store.getThread;
 export const setThread = store.setThread;
+export const setNote = store.setNote;
+export const touchAnnotation = store.touchAnnotation;
+export const getAllPages = store.getAllPages;
 export const appendThreadMessage = store.appendThreadMessage;
 export const pruneIfTooLarge = store.pruneIfTooLarge;
 export const clearPage = store.clearPage;

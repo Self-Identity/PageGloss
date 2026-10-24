@@ -30,6 +30,8 @@
     contextMode: DEFAULT_CONTEXT_MODE,
     matchMode: DEFAULT_MATCH_MODE,
     markSentenceTokens: false,
+    markHotkey: 'Alt+Q',
+    selectionButton: true,
     apiBaseUrl: '',
     apiKey: '',
     model: 'gpt-4o-mini',
@@ -234,6 +236,21 @@
   }
 
   /**
+   * Site bucket key used by the data page: protocol plus host, with a leading
+   * "www." dropped so www.example.com and example.com share one group.
+   */
+  function siteGroupOf(rawUrl) {
+    try {
+      var parsed = new URL(String(rawUrl || ''));
+      var host = parsed.hostname.replace(/^www\./i, '');
+      var port = parsed.port && parsed.port !== '80' && parsed.port !== '443' ? ':' + parsed.port : '';
+      return parsed.protocol + '//' + host + port;
+    } catch (err) {
+      return String(rawUrl || '');
+    }
+  }
+
+  /**
    * Error object from background messages -> the i18n key that explains it.
    * Shared by the content script, popup and options page so every surface
    * reports the same thing instead of a bare "http".
@@ -310,6 +327,7 @@
     cssEscape: cssEscape,
     uuid: uuid,
     isWordLikeNeedle: isWordLikeNeedle,
+    siteGroupOf: siteGroupOf,
     apiErrorKey: apiErrorKey
   };
 })();

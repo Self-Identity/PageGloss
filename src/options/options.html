@@ -93,7 +93,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card" id="contextCard">
         <h2 id="contextTitle"></h2>
 
         <div class="field">
@@ -121,6 +121,21 @@
           <span id="cardHoverOpenLabel"></span>
         </label>
 
+        <label class="check" for="selectionButton">
+          <input type="checkbox" id="selectionButton">
+          <span id="selectionButtonLabel"></span>
+        </label>
+        <p class="hint" id="selectionButtonHint"></p>
+
+        <div class="field">
+          <label for="markHotkey" id="markHotkeyLabel"></label>
+          <div class="input-row">
+            <input type="text" id="markHotkey" readonly spellcheck="false" autocomplete="off" placeholder="Alt+Q">
+            <button class="btn ghost" id="resetHotkey" type="button"></button>
+          </div>
+          <p class="hint" id="markHotkeyHint"></p>
+        </div>
+
         <div class="field">
           <label for="language" id="languageLabel"></label>
           <select id="language">
@@ -131,10 +146,12 @@
         </div>
       </section>
 
-      <section class="card">
+      <section class="card" id="dataCard">
         <h2 id="dataTitle"></h2>
         <p class="hint" id="cacheSummary"></p>
+        <p class="hint" id="dataViewHint"></p>
         <div class="button-row">
+          <button class="btn primary" id="viewData" type="button"></button>
           <button class="btn" id="export" type="button"></button>
           <button class="btn" id="import" type="button"></button>
           <button class="btn danger" id="clearAll" type="button"></button>

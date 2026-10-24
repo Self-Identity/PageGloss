@@ -67,11 +67,18 @@
     el('matchModeStrict').textContent = t('matchStrict');
     el('matchModeHint').textContent = t(MATCH_MODE_HINTS[state.settings.matchMode] || MATCH_MODE_HINTS.smart);
     el('cardHoverOpenLabel').textContent = t('optCardHoverOpen');
+    el('selectionButtonLabel').textContent = t('optSelectionButton');
+    el('selectionButtonHint').textContent = t('optSelectionButtonHint');
+    el('markHotkeyLabel').textContent = t('optHotkey');
+    el('markHotkeyHint').textContent = t('optHotkeyHint');
+    el('resetHotkey').textContent = t('optHotkeyReset');
     el('languageLabel').textContent = t('optLanguage');
     var autoOption = el('language').querySelector('option[value="auto"]');
     if (autoOption) autoOption.textContent = t('optLanguageAuto');
 
     el('dataTitle').textContent = t('optDataSection');
+    el('dataViewHint').textContent = t('optDataViewHint');
+    el('viewData').textContent = t('optDataView');
     el('export').textContent = t('optExport');
     el('import').textContent = t('optImport');
     el('clearAll').textContent = t('optClearAll');
@@ -101,6 +108,8 @@
     el('markSentenceTokens').checked = !!settings.markSentenceTokens;
     renderMatchModes();
     el('cardHoverOpen').checked = !!settings.cardHoverOpen;
+    el('selectionButton').checked = settings.selectionButton !== false;
+    el('markHotkey').value = settings.markHotkey || 'Alt+Q';
     el('language').value = settings.language || 'auto';
   }
 
@@ -158,6 +167,8 @@
       markSentenceTokens: el('markSentenceTokens').checked,
       matchMode: (document.querySelector('#matchModes input[name="pg-match-mode"]:checked') || {}).value || state.settings.matchMode,
       cardHoverOpen: el('cardHoverOpen').checked,
+      selectionButton: el('selectionButton').checked,
+      markHotkey: el('markHotkey').value || 'Alt+Q',
       language: el('language').value
     };
     if (overrides) Object.keys(overrides).forEach(function (key) { patch[key] = overrides[key]; });
@@ -339,6 +350,31 @@
     }
   }
 
+  /**
+   * Normalise a keydown into a combination like "Alt+Q" or "Ctrl+Shift+K".
+   * Returns '' for modifier-only presses so the field never records junk.
+   */
+  function comboFromEvent(event) {
+    const parts = [];
+    if (event.ctrlKey) parts.push('Ctrl');
+    if (event.altKey) parts.push('Alt');
+    if (event.shiftKey) parts.push('Shift');
+    if (event.metaKey) parts.push('Meta');
+    const code = event.code || '';
+    let key = '';
+    if (/^Key[A-Z]$/.test(code)) key = code.slice(3);
+    else if (/^Digit[0-9]$/.test(code)) key = code.slice(5);
+    else if (/^F([1-9]|1[0-2])$/.test(code)) key = code;
+    else if (code === 'Space') key = 'Space';
+    else if (code.indexOf('Numpad') === 0) key = 'Num' + code.slice(6);
+    else if (event.key && event.key.length === 1) key = event.key.toUpperCase();
+    else if (event.key && event.key !== 'Unidentified' && event.key !== 'Control' &&
+      event.key !== 'Alt' && event.key !== 'Shift' && event.key !== 'Meta') key = event.key;
+    if (!key) return '';
+    parts.push(key);
+    return parts.join('+');
+  }
+
   function exportData() {
     Store.exportAll().then(function (payload) {
       var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -394,7 +430,7 @@
     });
     el('baseUrl').addEventListener('input', renderResolvedEndpoint);
     el('baseUrl').addEventListener('change', renderResolvedEndpoint);
-    ['stream', 'markSentenceTokens', 'cardHoverOpen'].forEach(function (id) {
+    ['stream', 'markSentenceTokens', 'cardHoverOpen', 'selectionButton'].forEach(function (id) {
       el(id).addEventListener('change', scheduleSave);
     });
 
@@ -442,6 +478,32 @@
     });
 
     el('test').addEventListener('click', testConnection);
+    el('viewData').addEventListener('click', function () {
+      chrome.tabs.create({ url: chrome.runtime.getURL('src/data/data.html') });
+    });
+
+    // Hotkey recorder: focus the read-only field and press the combination.
+    el('markHotkey').addEventListener('keydown', function (event) {
+      if (event.isComposing) return;
+      const combo = comboFromEvent(event);
+      if (!combo) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!/^(Ctrl|Alt|Shift|Meta)\+/.test(combo)) {
+        UI.toast(t('optHotkeyInvalid'), { duration: 3600 });
+        return;
+      }
+      el('markHotkey').value = combo;
+      scheduleSave();
+      UI.toast(t('optHotkeySaved'), { duration: 2200 });
+    });
+    el('markHotkey').addEventListener('focus', function () {
+      el('markHotkey').select();
+    });
+    el('resetHotkey').addEventListener('click', function () {
+      el('markHotkey').value = 'Alt+Q';
+      scheduleSave();
+    });
     el('fetchModels').addEventListener('click', fetchModels);
     el('export').addEventListener('click', exportData);
     el('import').addEventListener('click', function () { el('importFile').click(); });

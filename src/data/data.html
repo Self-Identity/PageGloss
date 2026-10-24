@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PageGloss</title>
+  <link rel="stylesheet" href="data.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H19v13.5H6.5A2.5 2.5 0 0 0 4 20z"></path>
+            <path d="M4 6.5V20"></path>
+            <path d="M8 8.5h7M8 12h5"></path>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h1 id="pageTitle"></h1>
+          <p class="stats" id="stats"></p>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn" id="expandAll" type="button">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M7 7l5 5 5-5"></path>
+            <path d="M7 13l5 5 5-5"></path>
+          </svg>
+          <span id="expandAllText"></span>
+        </button>
+        <button class="btn" id="collapseAll" type="button">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M7 17l5-5 5 5"></path>
+            <path d="M7 11l5-5 5 5"></path>
+          </svg>
+          <span id="collapseAllText"></span>
+        </button>
+        <button class="btn btn-icon" id="refresh" type="button">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M20.5 11a8.5 8.5 0 1 1-2.2-5.7"></path>
+            <path d="M20.5 4v7h-7"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="content" id="content">
+      <p class="status" id="status" role="status" aria-live="polite" hidden></p>
+      <div class="sites" id="sites"></div>
+    </main>
+  </div>
+  <script src="../shared/messages.js"></script>
+  <script src="../shared/i18n.js"></script>
+  <script src="../shared/storage.js"></script>
+  <script src="data.js"></script>
+</body>
+</html>

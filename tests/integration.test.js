@@ -557,6 +557,13 @@ function createCardStub() {
         abort() {},
         scrollToEnd() {},
         setPosition() {},
+        // 1.1.0 additions: notes, typing guard, animated close, reasoning.
+        appendReasoning(text) { this.messages.push({ role: 'reasoning', content: text }); },
+        setNote(text) { this.note = String(text || ''); },
+        getNote() { return this.note || ''; },
+        isTyping() { return !!this.typing; },
+        flashNoteSaved() {},
+        close() { this.destroyed = true; },
         destroy() { this.destroyed = true; }
       };
       return card;
@@ -861,6 +868,35 @@ async function main() {
     assertEqual(response.contextMode, 'page', 'context mode reported');
     assertEqual(response.annotations.length, 1, 'annotation listed');
     assertEqual(response.annotations[0].marks, 2, 'mark count reported');
+  });
+
+  await test('site grouping ignores www and keeps the protocol', async () => {
+    const env = bootContent('words');
+    const S = env.sandbox.PageGlossShared;
+    assertEqual(S.siteGroupOf('https://www.example.com/a/b?x=1'), 'https://example.com', 'www stripped');
+    assertEqual(S.siteGroupOf('http://blog.example.com:8080/x'), 'http://blog.example.com:8080', 'port kept');
+    assertEqual(S.siteGroupOf('https://example.com/y'), 'https://example.com', 'same bucket');
+    assertEqual(S.siteGroupOf('not a url'), 'not a url', 'unparsable input passes through');
+  });
+
+  await test('notes round-trip through storage with a fresh updatedAt', async () => {
+    const env = bootContent('words');
+    const Store = env.sandbox.PageGlossStore;
+    const page = Store.sanitizePage({
+      url: 'https://example.com/a',
+      title: 'A',
+      annotations: [{ id: 'a1', text: 'alpha', color: '#fff2a8', anchors: [] }]
+    }, 'https://example.com/a');
+    const before = Date.now();
+    Store.setNote(page, 'a1', 'my note');
+    assertEqual(page.annotations[0].note, 'my note', 'note is written onto the annotation');
+    assert(page.annotations[0].updatedAt >= before, 'updatedAt is bumped');
+    assertEqual(page.annotations[0].note, 'my note', 'note stays readable');
+    await Store.savePage(page);
+    const all = await Store.getAllPages();
+    assertEqual(all.length, 1, 'one page is listed');
+    assertEqual(all[0].annotations[0].note, 'my note', 'note survives the storage round trip');
+    assert(all[0].annotations[0].noteUpdatedAt > 0, 'noteUpdatedAt is persisted');
   });
 
   const failed = results.filter((item) => !item.ok);

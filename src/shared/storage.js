@@ -32,6 +32,7 @@
   var MATCH_MODES = shared.MATCH_MODES;
   var DEFAULT_MATCH_MODE = shared.DEFAULT_MATCH_MODE;
   var storageKey = shared.storageKey;
+  var NOTE_LIMIT = 8000;
 
   var cachedArea = null;
 
@@ -136,6 +137,12 @@
     if (Array.isArray(raw.annotations)) {
       page.annotations = raw.annotations.filter(function (item) {
         return item && typeof item === 'object' && typeof item.id === 'string' && typeof item.text === 'string';
+      });
+      page.annotations.forEach(function (item) {
+        if (typeof item.note !== 'string') item.note = '';
+        if (!Number(item.createdAt)) item.createdAt = page.updatedAt;
+        if (!Number(item.updatedAt)) item.updatedAt = Number(item.createdAt) || page.updatedAt;
+        if (!Number(item.noteUpdatedAt)) item.noteUpdatedAt = 0;
       });
     }
     if (raw.chats && typeof raw.chats === 'object') {
@@ -381,6 +388,38 @@
     });
   }
 
+  /** Every cached page with its annotations, newest first (used by the data page). */
+  function getAllPages() {
+    return get(null).then(function (result) {
+      var pages = [];
+      Object.keys(result).forEach(function (key) {
+        if (key.indexOf(PAGE_PREFIX) !== 0) return;
+        pages.push(sanitizePage(result[key], key.slice(PAGE_PREFIX.length)));
+      });
+      pages.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      return pages;
+    });
+  }
+
+  /** Store the free form note for one annotation and bump its timestamps. */
+  function setNote(page, annotationId, text) {
+    var target = page.annotations.find(function (item) { return item.id === annotationId; });
+    if (!target) return null;
+    var now = Date.now();
+    target.note = String(text == null ? '' : text).slice(0, NOTE_LIMIT);
+    target.noteUpdatedAt = now;
+    target.updatedAt = now;
+    return target;
+  }
+
+  /** Mark success counts as an update of the annotation. */
+  function touchAnnotation(page, annotationId) {
+    var target = page.annotations.find(function (item) { return item.id === annotationId; });
+    if (!target) return null;
+    target.updatedAt = Date.now();
+    return target;
+  }
+
   function getIndexSummary() {
     return get(INDEX_KEY).then(function (result) {
       var index = result[INDEX_KEY];
@@ -424,6 +463,9 @@
     getThread: getThread,
     setThread: setThread,
     appendThreadMessage: appendThreadMessage,
+    setNote: setNote,
+    touchAnnotation: touchAnnotation,
+    getAllPages: getAllPages,
     pruneIfTooLarge: pruneIfTooLarge,
     clearPage: clearPage,
     clearAll: clearAll,

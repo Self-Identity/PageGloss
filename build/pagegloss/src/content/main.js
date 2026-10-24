@@ -66,6 +66,7 @@
 
   var state = {
     settings: null,
+    settingsPromise: null,
     page: null,
     urlKey: S.normalizeUrlKey(location.href),
     annotations: [],
@@ -73,7 +74,8 @@
     pendingMenu: null,
     note: null,
     hoverTimer: 0,
-    hideTimer: 0
+    hideTimer: 0,
+    scrollLock: 0
   };
 
   var TOAST_ID = 'pagegloss-toast-host';
@@ -101,8 +103,24 @@
     }
   }
 
+  /**
+   * Settings are loaded asynchronously at boot. Everything that asks the user
+   * to configure the LLM must wait for that load instead of guessing: checking
+   * an empty snapshot is exactly what produced the old false "not configured"
+   * toast right after every page load.
+   */
+  function whenSettings() {
+    if (state.settings) return Promise.resolve(state.settings);
+    if (state.settingsPromise) {
+      return state.settingsPromise.catch(function () { return null; });
+    }
+    return Promise.resolve(null);
+  }
+
   /** The three settings every explanation request needs. */
   function llmConfigState() {
+    // Not loaded yet: the caller must wait (whenSettings) instead of warning.
+    if (!state.settings) return { ready: false, code: 'loading', pending: true, missing: [], message: '' };
     var settings = state.settings || {};
     var hasUrl = !!String(settings.apiBaseUrl || '').trim();
     var hasKey = !!String(settings.apiKey || '').trim();
@@ -130,14 +148,14 @@
    * card with a retry button.
    */
   function notifyNotConfigured(config, card) {
-    var state = config || llmConfigState();
-    if (state.ready) return false;
-    showToast(state.message, {
+    var configState = config || llmConfigState();
+    if (configState.ready || configState.pending) return false;
+    showToast(configState.message, {
       duration: 6000,
       action: { label: t('cfgOpenOptions'), run: openOptionsPage }
     });
     if (card) {
-      card.addError(state.message, function () {
+      card.addError(configState.message, function () {
         var annotation = stateAnnotationForCard(card);
         if (annotation) requestExplanation(annotation, card);
       }, { onOpenSettings: openOptionsPage });
@@ -281,6 +299,279 @@
     return null;
   }
 
+  /* ---------------------------------------------------- selection mark button */
+
+  var SELECTION_CSS = [
+    ':host { all: initial; display: block; }',
+    '.selection-mark {',
+    '  display: inline-flex; align-items: center; gap: 5px;',
+    '  height: 28px; padding: 0 10px; flex-shrink: 0;',
+    '  font: 12.5px/1 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;',
+    '  white-space: nowrap; color: #fff; background: #2f6fed;',
+    '  border: 1px solid transparent; border-radius: 8px; cursor: pointer;',
+    '  box-shadow: 0 6px 18px rgba(15, 23, 42, .3);',
+    '}',
+    '.selection-mark:hover { filter: brightness(1.06); }',
+    '.selection-mark svg { width: 1em; height: 1em; flex-shrink: 0; }'
+  ].join('');
+
+  var selectionButton = { host: null, button: null, visible: false, checkTimer: 0, suppressUntil: 0 };
+
+  function selectionButtonEnabled() {
+    return !!(state.settings && state.settings.enabled && state.settings.selectionButton !== false);
+  }
+
+  /** Decorative inline SVG; built with DOM APIs so no markup is injected. */
+  function createSelectionIcon() {
+    try {
+      if (typeof document.createElementNS !== 'function') return null;
+      var ns = 'http://www.w3.org/2000/svg';
+      var svg = document.createElementNS(ns, 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', 'currentColor');
+      svg.setAttribute('stroke-width', '1.9');
+      svg.setAttribute('stroke-linecap', 'round');
+      svg.setAttribute('stroke-linejoin', 'round');
+      svg.setAttribute('aria-hidden', 'true');
+      var pathA = document.createElementNS(ns, 'path');
+      pathA.setAttribute('d', 'M4 20l4.5-1 9-9-3.5-3.5-9 9z');
+      var pathB = document.createElementNS(ns, 'path');
+      pathB.setAttribute('d', 'M13 6.5L16.5 10');
+      svg.appendChild(pathA);
+      svg.appendChild(pathB);
+      return svg;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function ensureSelectionButton() {
+    if (selectionButton.host && selectionButton.host.isConnected) return selectionButton;
+    var host = document.createElement('pagegloss-ui');
+    host.id = 'pagegloss-selection-host';
+    // display:none inline, because the page's `pagegloss-ui { display:block }`
+    // rule outranks both the UA [hidden] rule and :host styles.
+    host.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483646;display:none;';
+    var shadow = host.attachShadow({ mode: 'open' });
+    var style = document.createElement('style');
+    style.textContent = SELECTION_CSS;
+    shadow.appendChild(style);
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'selection-mark';
+    button.title = t('selectionMark');
+    button.setAttribute('aria-label', t('selectionMark'));
+    var icon = createSelectionIcon();
+    if (icon) button.appendChild(icon);
+    var label = document.createElement('span');
+    label.className = 'selection-mark-label';
+    label.textContent = t('selectionMark');
+    button.appendChild(label);
+    // mousedown is prevented so the selection survives the click.
+    button.addEventListener('mousedown', function (event) { event.preventDefault(); });
+    button.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      hideSelectionButton();
+      var info = selectionInfo();
+      if (!info || !info.text) {
+        showToast(t('toastNoSelection'));
+        return;
+      }
+      startMarking(info);
+    });
+    shadow.appendChild(button);
+    (document.body || document.documentElement).appendChild(host);
+    selectionButton.host = host;
+    selectionButton.button = button;
+    return selectionButton;
+  }
+
+  function hideSelectionButton() {
+    selectionButton.visible = false;
+    if (selectionButton.checkTimer) {
+      window.clearTimeout(selectionButton.checkTimer);
+      selectionButton.checkTimer = 0;
+    }
+    if (selectionButton.host) selectionButton.host.style.display = 'none';
+  }
+
+  /** Geometry of the current non-empty selection, or null. */
+  function selectionAnchor() {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    if (!String(selection.toString() || '').trim()) return null;
+    var range = selection.getRangeAt(0);
+    var node = range.startContainer;
+    var element = node && node.nodeType === 1 ? node : (node ? node.parentElement : null);
+    if (!element || (element.closest && (element.closest('pagegloss-ui') || element.closest(MARK_TAG)))) return null;
+    if (isEditableTarget(element)) return null;
+    var rect = range.getBoundingClientRect ? range.getBoundingClientRect() : null;
+    if ((!rect || (!rect.width && !rect.height)) && range.getClientRects) {
+      var rects = range.getClientRects();
+      if (rects && rects.length) rect = rects[rects.length - 1];
+    }
+    return { range: range, rect: rect || { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 } };
+  }
+
+  function updateSelectionButton() {
+    selectionButton.checkTimer = 0;
+    if (!selectionButtonEnabled()) {
+      hideSelectionButton();
+      return;
+    }
+    // Do not pop the button back right after a mark while the selection lives on.
+    if (Date.now() < selectionButton.suppressUntil) {
+      hideSelectionButton();
+      return;
+    }
+    var anchor = selectionAnchor();
+    if (!anchor) {
+      hideSelectionButton();
+      return;
+    }
+    var ui = ensureSelectionButton();
+    if (!ui || !ui.host) return;
+    var rect = anchor.rect;
+    var width = ui.host.offsetWidth || 134;
+    var height = ui.host.offsetHeight || 28;
+    var x = rect.right + 100;
+    if (x + width > window.innerWidth - 8) x = rect.left - 100 - width;
+    x = clamp(x, 8, Math.max(8, window.innerWidth - width - 8));
+    var y = clamp(rect.bottom + 8, 8, Math.max(8, window.innerHeight - height - 8));
+    ui.host.style.left = Math.round(x) + 'px';
+    ui.host.style.top = Math.round(y) + 'px';
+    ui.host.style.display = 'block';
+    selectionButton.visible = true;
+  }
+
+  function onSelectionChange() {
+    if (!selectionButtonEnabled()) {
+      hideSelectionButton();
+      return;
+    }
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !String(selection.toString() || '').trim()) {
+      hideSelectionButton();
+      return;
+    }
+    if (selectionButton.checkTimer) window.clearTimeout(selectionButton.checkTimer);
+    selectionButton.checkTimer = window.setTimeout(updateSelectionButton, 90);
+  }
+
+  function onSelectionMouseUp(event) {
+    if (event && event.button !== 0) return;
+    if (!selectionButtonEnabled()) return;
+    if (selectionButton.checkTimer) window.clearTimeout(selectionButton.checkTimer);
+    selectionButton.checkTimer = window.setTimeout(updateSelectionButton, 10);
+  }
+
+  /* --------------------------------------------------------- mark shortcut */
+
+  var hotkeyCache = { spec: null, parsed: null };
+
+  /** Parse 'Alt+Q', 'Ctrl+Shift+K' or 'Alt+KeyQ' into modifier + key parts. */
+  function parseHotkey(spec) {
+    var value = String(spec || '').trim();
+    if (!value) return null;
+    var parts = value.split('+');
+    var parsed = { alt: false, ctrl: false, shift: false, meta: false, key: '', code: '' };
+    var keyToken = '';
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i].replace(/^\s+|\s+$/g, '');
+      if (!part) continue;
+      var lower = part.toLowerCase();
+      if (lower === 'alt' || lower === 'option') parsed.alt = true;
+      else if (lower === 'ctrl' || lower === 'control') parsed.ctrl = true;
+      else if (lower === 'shift') parsed.shift = true;
+      else if (lower === 'meta' || lower === 'cmd' || lower === 'command' || lower === 'win' || lower === 'super') parsed.meta = true;
+      else keyToken = part;
+    }
+    if (!keyToken) return null;
+    var token = keyToken.toLowerCase();
+    var aliases = {
+      space: 'Space', esc: 'Escape', escape: 'Escape', enter: 'Enter', return: 'Enter',
+      tab: 'Tab', up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
+      del: 'Delete', delete: 'Delete', backspace: 'Backspace', plus: 'Equal', minus: 'Minus'
+    };
+    if (/^key[a-z]$/i.test(keyToken)) {
+      parsed.code = 'Key' + keyToken.slice(3).toUpperCase();
+      parsed.key = keyToken.slice(3).toLowerCase();
+    } else if (/^digit\d$/i.test(keyToken)) {
+      parsed.code = 'Digit' + keyToken.slice(5);
+      parsed.key = keyToken.slice(5);
+    } else if (/^f\d{1,2}$/i.test(keyToken)) {
+      parsed.code = keyToken.toUpperCase();
+    } else if (aliases[token]) {
+      parsed.code = aliases[token];
+    } else if (keyToken.length === 1) {
+      parsed.key = token;
+      if (/[a-z]/.test(token)) parsed.code = 'Key' + token.toUpperCase();
+      else if (/[0-9]/.test(token)) parsed.code = 'Digit' + token;
+    } else {
+      parsed.code = keyToken;
+    }
+    return parsed;
+  }
+
+  function isEditableTarget(target) {
+    var element = target && target.nodeType === 1 ? target : (target ? target.parentElement : null);
+    if (!element) return false;
+    if (element.isContentEditable) return true;
+    if (!element.closest) return false;
+    try {
+      return !!element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function matchesHotkey(spec, event) {
+    if (hotkeyCache.spec !== spec) {
+      hotkeyCache.spec = spec;
+      hotkeyCache.parsed = parseHotkey(spec);
+    }
+    var parsed = hotkeyCache.parsed;
+    if (!parsed) return false;
+    if (!!event.altKey !== parsed.alt) return false;
+    if (!!event.ctrlKey !== parsed.ctrl) return false;
+    if (!!event.shiftKey !== parsed.shift) return false;
+    if (!!event.metaKey !== parsed.meta) return false;
+    var code = String(event.code || '').toLowerCase();
+    var key = String(event.key || '').toLowerCase();
+    if (parsed.code && code && code === parsed.code.toLowerCase()) return true;
+    if (parsed.key && key && key === parsed.key) return true;
+    return false;
+  }
+
+  function onMarkHotkey(event) {
+    if (event.defaultPrevented) return;
+    if (event.isComposing || event.keyCode === 229) return;
+    var modifiers = ['Alt', 'Control', 'Shift', 'Meta', 'OS'];
+    if (modifiers.indexOf(event.key) >= 0) return;
+    if (!state.settings || !state.settings.enabled) return;
+    var spec = state.settings.markHotkey || S.DEFAULT_SETTINGS.markHotkey;
+    if (!matchesHotkey(spec, event)) return;
+    var path = event.composedPath ? event.composedPath() : [];
+    var target = path.length ? path[0] : event.target;
+    if (isEditableTarget(target)) return;
+    var element = target && target.nodeType === 1 ? target : (target ? target.parentElement : null);
+    if (element && element.closest) {
+      try {
+        if (element.closest('pagegloss-ui')) return;
+      } catch (err) { /* ignore */ }
+    }
+    event.preventDefault();
+    hideSelectionButton();
+    var info = selectionInfo();
+    if (!info || !info.text) {
+      showToast(t('toastHotkeyNoSelection'), { duration: 2200 });
+      return;
+    }
+    startMarking(info);
+  }
+
   /* --------------------------------------------------------- context capture */
 
   function topLevelElement(node) {
@@ -398,8 +689,9 @@
   }
 
   function buildContext(term, anchorElement, sentence) {
-    var mode = state.settings.contextMode || S.DEFAULT_CONTEXT_MODE;
-    var limit = state.settings.maxContextChars || S.MAX_PAGE_CHARS;
+    var settings = state.settings || {};
+    var mode = settings.contextMode || S.DEFAULT_CONTEXT_MODE;
+    var limit = settings.maxContextChars || S.MAX_PAGE_CHARS;
     var context = {
       mode: mode,
       title: document.title || '',
@@ -493,7 +785,7 @@
     var opts = options || {};
     var map = M.buildTextMap(document.body);
     var needles = [{ text: annotation.text, sentenceScope: false, secondary: false }];
-    if (state.settings.markSentenceTokens && /[\s。！？!?；;]/.test(annotation.text)) {
+    if (state.settings && state.settings.markSentenceTokens && /[\s。！？!?；;]/.test(annotation.text)) {
       var tokens = M.tokenize(annotation.text, M.stopwordTable());
       for (var i = 0; i < tokens.length; i++) {
         needles.push({ text: tokens[i], sentenceScope: false, secondary: true });
@@ -580,6 +872,7 @@
     var position = cardPositionFor(rect);
 
     if (state.note && state.note.annotationId === annotation.id) {
+      if (typeof state.note.card.setNote === 'function') state.note.card.setNote(annotation.note || '');
       if (opts.pin) {
         state.note.card.setPinned(true);
         state.note.card.setPosition(position.x, position.y);
@@ -594,6 +887,7 @@
       term: annotation.text,
       color: annotation.color,
       position: position,
+      note: typeof annotation.note === 'string' ? annotation.note : '',
       textColor: M.contrastTextColor ? M.contrastTextColor(annotation.color) : '',
       markCount: annotation.id ? M.countMarks(annotation.id) : 0
     });
@@ -662,6 +956,18 @@
         card.setPinned(!card.isPinned());
         if (!card.isPinned()) scheduleHide(320);
       },
+      onNoteChange: function (text) {
+        return persistNote(annotation, text);
+      },
+      onFullscreen: function () {
+        openFullpage(annotation);
+      },
+      onPointerEnter: function () {
+        window.clearTimeout(state.hideTimer);
+      },
+      onPointerLeave: function () {
+        scheduleHide(260);
+      },
       onClose: function () { closeNote(true); },
       onToast: function (message) { showToast(message, { duration: 1800 }); }
     });
@@ -676,8 +982,17 @@
     var note = state.note;
     state.note = null;
     window.clearTimeout(note.saveTimer);
-    note.card.abort();
-    note.card.destroy();
+    try { note.card.abort(); } catch (err) { /* already gone */ }
+    if (typeof note.card.close === 'function') {
+      try {
+        note.card.close();
+      } catch (err) {
+        note.card.destroy();
+      }
+    } else {
+      // Older card builds only know destroy().
+      note.card.destroy();
+    }
     if (userAction) persistThreadFrom(note.annotationId);
   }
 
@@ -689,11 +1004,84 @@
     }).catch(function () { /* ignore */ });
   }
 
+  var pageSaveTimer = 0;
+
+  /** Debounced page write; resolves with true only after the write succeeded. */
+  function savePageDebounced(delay) {
+    if (!state.page) return Promise.resolve(false);
+    if (pageSaveTimer) window.clearTimeout(pageSaveTimer);
+    return new Promise(function (resolve) {
+      pageSaveTimer = window.setTimeout(function () {
+        pageSaveTimer = 0;
+        if (!state.page) {
+          resolve(false);
+          return;
+        }
+        Store.savePage(state.page).then(function () {
+          resolve(true);
+        }).catch(function () {
+          resolve(false);
+        });
+      }, delay == null ? 220 : delay);
+    });
+  }
+
+  /** Persist the free-form note of one annotation (called by the card). */
+  function persistNote(annotation, text) {
+    var value = String(text == null ? '' : text);
+    annotation.note = value;
+    annotation.updatedAt = Date.now();
+    if (!state.page) return Promise.resolve(false);
+    var stored = null;
+    try {
+      stored = Store.setNote(state.page, annotation.id, value);
+    } catch (err) {
+      stored = null;
+    }
+    if (!stored) return Promise.resolve(false);
+    var runtime = annotationById(annotation.id);
+    if (runtime) {
+      runtime.note = value;
+      runtime.updatedAt = annotation.updatedAt;
+      runtime.noteUpdatedAt = Date.now();
+    }
+    return savePageDebounced(220);
+  }
+
+  /** Ask the background worker to open the full-page reading view. */
+  function openFullpage(annotation) {
+    var annotationId = annotation && annotation.id ? annotation.id : '';
+    var failed = function () { showToast(t('cardFullscreenFailed'), { duration: 3200 }); };
+    if (!annotationId) {
+      failed();
+      return;
+    }
+    try {
+      if (!chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') {
+        failed();
+        return;
+      }
+      chrome.runtime.sendMessage({
+        type: 'pg:openFullpage',
+        urlKey: state.urlKey,
+        annotationId: annotationId
+      }, function (response) {
+        var error = chrome.runtime.lastError;
+        if (error || (response && response.ok === false)) failed();
+      });
+    } catch (err) {
+      failed();
+    }
+  }
+
   function scheduleHide(delay) {
     window.clearTimeout(state.hideTimer);
     state.hideTimer = window.setTimeout(function () {
       if (!state.note) return;
-      if (state.note.card.isPinned()) return;
+      var card = state.note.card;
+      if (card.isPinned()) return;
+      // Never yank the card away while the reader is typing a question or note.
+      if (typeof card.isTyping === 'function' && card.isTyping()) return;
       if (isPointerInsideCard() || isPointerOnMark()) return;
       closeNote(true);
     }, delay == null ? 260 : delay);
@@ -703,7 +1091,7 @@
     if (!state.note || !state.note.card) return false;
     var host = state.note.card.host;
     if (!host || !host.isConnected) return false;
-    return host.matches(':hover');
+    return typeof host.matches === 'function' ? host.matches(':hover') : false;
   }
 
   var lastPointer = { x: 0, y: 0 };
@@ -717,6 +1105,16 @@
 
   function requestExplanation(annotation, card, options) {
     var config = llmConfigState();
+    if (config.pending) {
+      // Settings are still loading: wait instead of claiming a missing config.
+      var pendingHandle = { abort: function () {} };
+      whenSettings().then(function () {
+        if (!state.settings) return;
+        var next = requestExplanation(annotation, card, options);
+        if (next && typeof next.abort === 'function') pendingHandle.abort = next.abort;
+      });
+      return pendingHandle;
+    }
     if (!config.ready) {
       notifyNotConfigured(config, card);
       return null;
@@ -805,15 +1203,42 @@
   }
 
   function askQuestion(annotation, card, question, handlers) {
-    if (handlers && !handlers.onReasoning && card && card.appendReasoning) {
-      handlers.onReasoning = function (chunk) { card.appendReasoning(chunk); };
+    var requestHandlers = handlers || {};
+    if (card && card.appendReasoning && !requestHandlers.onReasoning) {
+      requestHandlers.onReasoning = function (chunk) { card.appendReasoning(chunk); };
     }
     var config = llmConfigState();
+    if (config.pending) {
+      // The follow-up was typed before the settings finished loading.
+      var aborted = false;
+      var current = null;
+      whenSettings().then(function () {
+        if (aborted) return;
+        var next = llmConfigState();
+        if (next.pending) return;
+        if (!next.ready) {
+          notifyNotConfigured(next, null);
+          if (typeof requestHandlers.onError === 'function') requestHandlers.onError(next.message);
+          return;
+        }
+        current = sendAsk(annotation, question, requestHandlers);
+      });
+      return {
+        abort: function () {
+          aborted = true;
+          if (current && typeof current.abort === 'function') current.abort();
+        }
+      };
+    }
     if (!config.ready) {
       notifyNotConfigured(config, null);
-      handlers.onError(config.message);
+      if (typeof requestHandlers.onError === 'function') requestHandlers.onError(config.message);
       return { abort: function () {} };
     }
+    return sendAsk(annotation, question, requestHandlers);
+  }
+
+  function sendAsk(annotation, question, handlers) {
     var history = (state.threads[annotation.id] || []).filter(function (item) {
       return item.role === 'user' || item.role === 'assistant';
     });
@@ -935,6 +1360,8 @@
 
   function startMarking(info) {
     var text = S.truncate(M.normalizeNeedle(info.text), 300);
+    selectionButton.suppressUntil = Date.now() + 600;
+    hideSelectionButton();
     if (!text) {
       showToast(t('toastNoSelection'));
       return;
@@ -945,7 +1372,7 @@
     if (existing) {
       showToast(t('toastAlready'));
       var mark = document.querySelector(MARK_TAG + '[data-pg-id="' + S.cssEscape(existing.id) + '"]');
-      openNote(existing, { mark: mark, pin: true, auto: false });
+      openNote(existing, { mark: mark, pin: false, auto: false });
       return;
     }
     var annotation = {
@@ -954,6 +1381,8 @@
       color: M.pickColor(text.toLowerCase()),
       sentence: info.sentence || '',
       createdAt: Date.now(),
+      updatedAt: Date.now(),
+      note: '',
       marks: 0,
       anchors: [],
       explanation: ''
@@ -966,15 +1395,20 @@
       return;
     }
     state.annotations.push(annotation);
-    if (state.page) Store.upsertAnnotation(state.page, stripRuntime(annotation));
+    annotation.updatedAt = Date.now();
+    if (state.page) {
+      Store.upsertAnnotation(state.page, stripRuntime(annotation));
+      // A successful mark counts as an update of the annotation.
+      Store.touchAnnotation(state.page, annotation.id);
+    }
 
     var config = llmConfigState();
-    if (!config.ready) {
+    if (!config.ready && !config.pending) {
       showToast(t('toastMarkedNoLlm', { n: result.created }), { duration: 4200 });
       saveAnnotationsDebounced();
       // Still open the card so the notice, the settings shortcut and the retry
-      // button are one click away.
-      var pending = openNote(annotation, { pin: true, auto: false });
+      // button are one click away. It is NOT pinned: only the pin button pins.
+      var pending = openNote(annotation, { pin: false, auto: false });
       notifyNotConfigured(config, pending);
       return pending;
     }
@@ -985,7 +1419,8 @@
     } else {
       showToast(t('toastMarked', { n: result.created }));
     }
-    var card = openNote(annotation, { pin: true, auto: true });
+    // Marking never pins the card; the pin button is the only way to pin.
+    var card = openNote(annotation, { pin: false, auto: true });
     saveAnnotationsDebounced();
     return card;
   }
@@ -1055,7 +1490,38 @@
     saveAnnotationsDebounced();
   }
 
-  function clearPage() {
+  /**
+   * Ask before wiping the page. The card module renders the custom dialog in
+   * its own shadow root so it matches the card style; native window.confirm is
+   * only a fallback for contexts where the card UI is unavailable (tests,
+   * stubbed builds).
+   */
+  function requestClearPage() {
+    var count = state.annotations.length;
+    var labels = {
+      title: t('confirmClearTitle'),
+      body: t('confirmClearBody', { n: count }),
+      cancel: t('confirmCancel'),
+      ok: t('confirmClearOk')
+    };
+    if (Card && typeof Card.confirm === 'function') {
+      try {
+        return Promise.resolve(Card.confirm(labels)).catch(function () { return false; });
+      } catch (err) {
+        // fall through to the native dialog below
+      }
+    }
+    try {
+      if (typeof window.confirm === 'function') {
+        return Promise.resolve(!!window.confirm(labels.title + '\n' + labels.body));
+      }
+    } catch (err) { /* ignore */ }
+    // No dialog surface at all: do not block the caller forever.
+    return Promise.resolve(true);
+  }
+
+  /** Clear every annotation of this page, without asking. */
+  function clearPageNow() {
     M.unwrapAnnotations(null);
     state.annotations = [];
     state.threads = {};
@@ -1064,10 +1530,20 @@
       state.page.annotations = [];
       state.page.chats = {};
     }
-    Store.clearPage(state.urlKey).then(function () {
+    return Store.clearPage(state.urlKey).then(function () {
       showToast(t('toastCleared'));
+      return true;
     }).catch(function () {
       showToast(t('toastCleared'));
+      return true;
+    });
+  }
+
+  /** Public clear action: always goes through the in-page confirmation. */
+  function clearPage() {
+    return requestClearPage().then(function (confirmed) {
+      if (!confirmed) return false;
+      return clearPageNow();
     });
   }
 
@@ -1166,11 +1642,43 @@
     var id = mark.getAttribute('data-pg-id');
     var annotation = annotationById(id);
     if (!annotation) return;
-    if (state.note && state.note.annotationId === id && state.note.card.isPinned()) {
-      closeNote(true);
+    if (state.note && state.note.annotationId === id) {
+      // Already open: keep its current pin state. Only the pin button pins.
+      state.note.card.focus();
       return;
     }
-    openNote(annotation, { mark: mark, pin: true, auto: !annotation.explanation, focus: true });
+    // Clicking a highlight opens an UNPINNED card; pinning is explicit.
+    openNote(annotation, { mark: mark, pin: false, auto: !annotation.explanation, focus: true });
+  }
+
+  function isInsideCardHost(event) {
+    if (!state.note || !state.note.card) return true;
+    var host = state.note.card.host;
+    if (!host) return true;
+    var path = event.composedPath ? event.composedPath() : [];
+    if (path.indexOf(host) >= 0) return true;
+    var target = event.target;
+    if (target && target.nodeType === 1 && host.contains && host.contains(target)) return true;
+    return false;
+  }
+
+  /** An unpinned card closes when the page outside it is pressed. */
+  function closeOnOutside(event) {
+    if (!state.note) return;
+    if (state.note.card.isPinned()) return;
+    if (isInsideCardHost(event)) return;
+    // Pressing a <pagegloss-mark> is not "outside": the click handler owns it.
+    if (targetFromPoint(event.target)) return;
+    closeNote(true);
+  }
+
+  function onGlobalKeyDown(event) {
+    if (event.key === 'Escape') {
+      hideSelectionButton();
+      if (state.note) closeNote(true);
+      return;
+    }
+    onMarkHotkey(event);
   }
 
   document.addEventListener('contextmenu', onContextMenu, true);
@@ -1178,12 +1686,18 @@
   document.addEventListener('mouseover', onMouseOver, true);
   document.addEventListener('mouseout', onMouseOut, true);
   document.addEventListener('click', onClick, true);
+  document.addEventListener('mousedown', closeOnOutside, true);
+  document.addEventListener('click', closeOnOutside, true);
+  document.addEventListener('selectionchange', onSelectionChange);
+  document.addEventListener('mouseup', onSelectionMouseUp, true);
   window.addEventListener('scroll', function () {
+    hideSelectionButton();
+    // Opening a card can itself scroll the page (scrollIntoView / deep links);
+    // that scroll must not immediately close the card it was opened for.
+    if (Date.now() < state.scrollLock) return;
     if (state.note && !state.note.card.isPinned()) closeNote(true);
   }, { passive: true });
-  window.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && state.note) closeNote(true);
-  });
+  window.addEventListener('keydown', onGlobalKeyDown);
 
   /* ------------------------------------------------------------- messaging in */
 
@@ -1230,7 +1744,9 @@
         if (target) {
           var mark = document.querySelector(MARK_TAG + '[data-pg-id="' + S.cssEscape(target.id) + '"]');
           if (mark) mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          openNote(target, { mark: mark, pin: true, auto: !target.explanation });
+          // The smooth scroll fires scroll events; keep the card alive through them.
+          state.scrollLock = Date.now() + 900;
+          openNote(target, { mark: mark, pin: false, auto: !target.explanation });
         }
         sendResponse({ ok: !!target });
         return undefined;
@@ -1280,7 +1796,7 @@
     if (context.kind === 'mark') {
       var existing = annotationById(context.annotationId);
       if (existing) {
-        openNote(existing, { mark: context.mark, pin: true, auto: !existing.explanation });
+        openNote(existing, { mark: context.mark, pin: false, auto: !existing.explanation });
         return;
       }
       info = { text: context.info.text, anchorElement: context.mark, sentence: M.sentenceAround(context.mark, context.info.text) };
@@ -1339,6 +1855,36 @@
 
   /* --------------------------------------------------------------------- boot */
 
+  /**
+   * Deep link used by the data page: #pg-focus=<encodeURIComponent(id)> opens
+   * that annotation and scrolls it into view. Unknown ids are ignored silently.
+   */
+  function focusFromHash() {
+    var hash = String(location.hash || '');
+    var match = /pg-focus=([^&]+)/.exec(hash);
+    if (!match) return;
+    var wanted = match[1];
+    var decoded = wanted;
+    try { decoded = decodeURIComponent(wanted); } catch (err) { decoded = wanted; }
+    var annotation = annotationById(decoded) || annotationById(wanted);
+    if (!annotation) return;
+    var mark = null;
+    try {
+      mark = document.querySelector(MARK_TAG + '[data-pg-id="' + S.cssEscape(annotation.id) + '"]');
+    } catch (err) {
+      mark = null;
+    }
+    if (mark && typeof mark.scrollIntoView === 'function') {
+      try {
+        mark.scrollIntoView({ block: 'center', behavior: 'auto' });
+      } catch (err) {
+        try { mark.scrollIntoView(); } catch (err2) { /* ignore */ }
+      }
+    }
+    state.scrollLock = Date.now() + 800;
+    openNote(annotation, { mark: mark, pin: false, auto: false });
+  }
+
   function boot() {
     if (!document.body) {
       // Nothing to attach marks or the card to yet; retry once the DOM exists.
@@ -1348,37 +1894,38 @@
       return;
     }
 
-    Store.getSettings()
+    state.settingsPromise = Store.getSettings()
       .then(function (settings) {
         state.settings = settings;
-        if (!settings.enabled) return null;
+        if (!settings.enabled) return settings;
         return Store.getPage(state.urlKey)
           .then(function (page) {
             state.page = page;
             state.page.url = location.href;
             state.page.title = document.title;
             restorePage();
-            return null;
+            focusFromHash();
+            return settings;
           })
           .catch(function (err) {
             // Storage may be unavailable (quota, disabled sync); marking still
             // works for this session, only persistence is skipped.
             console.warn('[PageGloss] stored annotations could not be read:', err && err.message ? err.message : err);
             showToast(t('errStorageUnavailable'), { duration: 4200 });
-            return null;
+            return settings;
           });
       })
       .catch(function (err) {
         state.settings = state.settings || Store.normalizeSettings({});
         console.warn('[PageGloss] settings could not be read:', err && err.message ? err.message : err);
         showToast(t('errStorageUnavailable'), { duration: 4200 });
+        return state.settings;
       });
 
-    var config = llmConfigState();
-    if (!config.ready) {
-      // Friendly heads-up instead of failing later with a cryptic request error.
-      showToast(config.message, { duration: 6000, action: { label: t('cfgOpenOptions'), run: openOptionsPage } });
-    }
+    // Deliberately NO "LLM not configured" warning here. The settings request
+    // above is asynchronous, so checking llmConfigState() at this point warned
+    // on every page load even when everything was configured. The notice is
+    // shown by the first real mark / follow-up instead.
   }
 
   if (document.readyState === 'loading') {

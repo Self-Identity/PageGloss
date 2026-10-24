@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PageGloss</title>
+  <link rel="stylesheet" href="fullpage.css">
+</head>
+<body>
+  <div class="app">
+    <header class="toolbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H19v13.5H6.5A2.5 2.5 0 0 0 4 20z"></path>
+            <path d="M4 6.5V20"></path>
+            <path d="M8 8.5h7M8 12h5"></path>
+          </svg>
+        </span>
+        <h1 class="page-title" id="pageTitle"></h1>
+      </div>
+      <div class="toolbar-actions">
+        <span class="save-chip-host" id="saveChipHost" role="status" aria-live="polite"></span>
+        <button class="btn ghost" id="openSourceBtn" type="button" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 4h6v6"></path>
+            <path d="M20 4l-9 9"></path>
+            <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"></path>
+          </svg>
+          <span id="openSourceLabel"></span>
+        </button>
+        <button class="btn" id="closeBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18"></path>
+          </svg>
+          <span id="closeLabel"></span>
+        </button>
+      </div>
+    </header>
+
+    <div class="state-view loading-view" id="loadingView" role="status" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <p class="state-text" id="loadingText"></p>
+    </div>
+
+    <div class="state-view missing-view" id="missingView" hidden>
+      <span class="state-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="6.5"></circle>
+          <path d="M16 16l4 4"></path>
+          <path d="M8.5 11h5"></path>
+        </svg>
+      </span>
+      <p class="state-text missing-text" id="missingText"></p>
+      <div class="state-actions">
+        <button class="btn ghost" id="missingOpenBtn" type="button" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 4h6v6"></path>
+            <path d="M20 4l-9 9"></path>
+            <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"></path>
+          </svg>
+          <span id="missingOpenLabel"></span>
+        </button>
+        <button class="btn" id="missingCloseBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18"></path>
+          </svg>
+          <span id="missingCloseLabel"></span>
+        </button>
+      </div>
+    </div>
+
+    <main class="workspace" id="workspace" hidden>
+      <aside class="panel chat-panel" aria-labelledby="chatHeading">
+        <div class="panel-head">
+          <h2 id="chatHeading"></h2>
+        </div>
+
+        <section class="annotation-block">
+          <p class="annotation-text" id="annotationText"></p>
+          <p class="source-title" id="sourceTitle"></p>
+          <p class="updated-at" id="chatUpdated"></p>
+        </section>
+
+        <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+
+        <form class="composer" id="askForm" novalidate>
+          <label class="sr-only" for="askInput" id="askLabel"></label>
+          <div class="composer-row">
+            <textarea id="askInput" rows="2" spellcheck="false"></textarea>
+            <button class="btn primary" id="sendBtn" type="submit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 12l16-8-6 16-2.5-6.5z"></path>
+                <path d="M11.5 13.5L20 4"></path>
+              </svg>
+              <span id="sendLabel"></span>
+            </button>
+          </div>
+        </form>
+      </aside>
+
+      <section class="panel note-panel" aria-labelledby="noteHeading">
+        <div class="panel-head note-head">
+          <h2 id="noteHeading"></h2>
+          <p class="updated-at" id="noteUpdated"></p>
+        </div>
+        <div class="note-body">
+          <label class="sr-only" for="noteInput" id="noteLabel"></label>
+          <textarea class="note-input" id="noteInput" spellcheck="false"></textarea>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-root" id="toastRoot" role="status" aria-live="polite"></div>
+
+  <script src="../shared/messages.js"></script>
+  <script src="../shared/i18n.js"></script>
+  <script src="../shared/storage.js"></script>
+  <script src="fullpage.js"></script>
+</body>
+</html>

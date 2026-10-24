@@ -28,6 +28,7 @@ function createChromeStub() {
     menus: [],
     menuUpdates: [],
     tabMessages: [],
+    tabCreates: [],
     lastMenuCreateOptions: null,
     runtime: {
       lastError: null,
@@ -62,6 +63,10 @@ function createChromeStub() {
       query: async () => [{ id: 1, url: 'https://example.com/a' }, { id: 2, url: 'chrome://extensions' }],
       sendMessage: (tabId, message) => {
         stub.tabMessages.push({ tabId, message });
+      },
+      create: async (props) => {
+        stub.tabCreates.push(props);
+        return { id: 99 };
       },
       onUpdated: { addListener: () => {} }
     },
@@ -846,6 +851,41 @@ async function main() {
     const done = port.messages.find((message) => message.type === 'done');
     assertEqual(done.text, '推理全文', 'reasoning_content is used as the answer');
     assertEqual(done.reasoningOnly, true, 'flagged');
+  });
+
+  await test('the full page view is opened with the annotation identity', async () => {
+    const chrome = createChromeStub();
+    seed(chrome);
+    loadServiceWorker(chrome, async () => jsonResponse({}));
+    await waitFor(() => chrome.listeners.onMessage.length > 0);
+    const response = await new Promise((resolve) => {
+      chrome.listeners.onMessage[0]({
+        type: 'pg:openFullpage',
+        urlKey: 'https://example.com/a',
+        annotationId: 'ann-1'
+      }, {}, resolve);
+    });
+    assertEqual(response.ok, true, 'the tab is opened');
+    const created = chrome.tabCreates[0];
+    assert(created, 'chrome.tabs.create was called');
+    assert(
+      created.url.indexOf('chrome-extension://stub/src/fullpage/fullpage.html') === 0,
+      'full page url: ' + created.url
+    );
+    assert(created.url.indexOf('key=https%3A%2F%2Fexample.com%2Fa') >= 0, 'url key is encoded');
+    assert(created.url.indexOf('id=ann-1') >= 0, 'annotation id is forwarded');
+  });
+
+  await test('opening the full page without an annotation is refused', async () => {
+    const chrome = createChromeStub();
+    seed(chrome);
+    loadServiceWorker(chrome, async () => jsonResponse({}));
+    await waitFor(() => chrome.listeners.onMessage.length > 0);
+    const response = await new Promise((resolve) => {
+      chrome.listeners.onMessage[0]({ type: 'pg:openFullpage', urlKey: '', annotationId: '' }, {}, resolve);
+    });
+    assertEqual(response.ok, false, 'no tab is created for an empty request');
+    assertEqual(chrome.tabCreates.length, 0, 'tabs.create was not called');
   });
 
   const failed = results.filter((item) => !item.ok);

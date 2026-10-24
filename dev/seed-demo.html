@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PageGloss 演示数据（dev）</title>
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --surface: #ffffff;
+      --fg: #131722;
+      --dim: #5f6675;
+      --border: #e3e7ef;
+      --accent: #2f6df6;
+      --accent-soft: rgba(47, 109, 246, .12);
+      --danger: #c0392b;
+      --danger-soft: rgba(192, 57, 43, .1);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171d;
+        --surface: #1b1f27;
+        --fg: #e9ecf3;
+        --dim: #9aa3b2;
+        --border: #2d323c;
+        --accent: #6f9bff;
+        --accent-soft: rgba(111, 155, 255, .16);
+        --danger: #ff8f86;
+        --danger-soft: rgba(255, 120, 110, .14);
+      }
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font: 13.5px/1.6 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .wrap {
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 28px 18px 60px;
+      min-width: 0;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 21px;
+      overflow-wrap: anywhere;
+    }
+
+    p {
+      margin: 0 0 14px;
+      color: var(--dim);
+      overflow-wrap: anywhere;
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 18px 0;
+      min-width: 0;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      height: 34px;
+      padding: 0 14px;
+      white-space: nowrap;
+      font: inherit;
+      font-weight: 600;
+      color: var(--fg);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--accent-soft);
+    }
+
+    button.primary {
+      color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    button.primary:hover {
+      filter: brightness(1.06);
+    }
+
+    button:disabled {
+      opacity: .55;
+      cursor: default;
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    .current {
+      font-size: 12px;
+      color: var(--dim);
+      min-height: 1em;
+    }
+
+    pre {
+      margin: 16px 0 0;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--fg);
+      font: 12.5px/1.6 ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      min-height: 96px;
+    }
+
+    pre.is-error {
+      color: var(--danger);
+      background: var(--danger-soft);
+      border-color: var(--danger);
+    }
+
+    a {
+      color: var(--accent);
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    Dev-only seed page. Not referenced by manifest.json or any UI.
+
+    The inline script below is intentional for this throwaway tool. Note that a
+    normal MV3 extension page runs with the default script-src 'self' policy, so
+    Chrome blocks inline scripts there; this page is meant for a local dev copy
+    whose CSP allows it (or for a browser that relaxes extension-page CSP).
+  -->
+  <main class="wrap">
+    <h1>PageGloss 演示数据</h1>
+    <p>
+      写入 3 个站点的人造标注，用来验证数据页的站点分组、每页 10 行的标题分页、
+      5 × 10 的标注矩阵分页，以及悬停解释 / 笔记浮层。写入的是普通数据，不带任何 demo 字段。
+    </p>
+    <p>写入后可打开 <a href="../src/data/data.html" target="_blank" rel="noopener">src/data/data.html</a> 查看效果。</p>
+    <p class="current" id="current">正在读取当前缓存…</p>
+
+    <div class="buttons">
+      <button class="primary" id="seed" type="button">写入演示数据</button>
+      <button id="clear" type="button">清空全部数据</button>
+    </div>
+
+    <pre id="output" role="status" aria-live="polite">尚未写入。点击「写入演示数据」开始。</pre>
+  </main>
+
+  <script src="../src/shared/messages.js"></script>
+  <script src="../src/shared/i18n.js"></script>
+  <script src="../src/shared/storage.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      var Store = window.PageGlossStore;
+      var S = window.PageGlossShared;
+
+      var out = document.getElementById('output');
+      var current = document.getElementById('current');
+      var seedBtn = document.getElementById('seed');
+      var clearBtn = document.getElementById('clear');
+
+      var COLORS = ['#fff2a8', '#b7ecc0', '#b9e2ff', '#ffd6cc', '#e2d3ff', '#ffe0b3', '#c8f2ef', '#f6d4ec'];
+
+      var LONG_TAIL = ' 这一段刻意写得比较长，用来检查标注格子的 overflow-wrap:anywhere 与 2-3 行截断是否生效，'
+
+        + '同时确认悬停浮层里的长解释能够滚动查看，不会撑破视口。';
+
+      var SAMPLES = [
+        {
+          text: 'idempotent',
+          sentence: 'HTTP PUT is idempotent: repeating the same request leaves the server in the same state.',
+          explanation: '幂等（idempotent）：同一个请求重复执行多次，服务端状态与执行一次相同。\n\n'
+            + '- 本义：数学里 f(f(x)) = f(x)。\n'
+            + '- HTTP：PUT、DELETE 通常幂等，POST 不保证。\n'
+            + '- 本页所指：重试上传接口不会产生重复记录。'
+        },
+        {
+          text: 'zero-build extension',
+          sentence: 'A zero-build extension ships native JS straight from the source folder.',
+          explanation: '零构建扩展：没有打包器与编译步骤，源码目录就是扩展运行时加载的文件。\n\n'
+            + '优点是改完刷新即生效；代价是没有类型检查、tree-shaking 和自动压缩。'
+        },
+        {
+          text: 'chrome.storage.local',
+          sentence: 'chrome.storage.local stores the page index separately from each page record.',
+          explanation: '扩展的本地持久化存储。与 localStorage 不同，它能在内容脚本、后台与设置页之间共享，'
+            + '并且支持 unlimitedStorage 权限。本页把它用来保存 `pg:index` 与 `pg:page:<urlKey>`。'
+        },
+        {
+          text: 'MV3 service worker',
+          sentence: 'The MV3 service worker sleeps between events, so all state must be persisted.',
+          explanation: 'Manifest V3 的后台是一个可被随时休眠的 service worker。\n\n'
+            + '因此不能依赖内存里的全局变量，标注与设置都要落到 chrome.storage.local。'
+        },
+        {
+          text: '文本截断',
+          sentence: '标题和 URL 都用 text-overflow: ellipsis 截断，完整内容放在 title 属性里。',
+          explanation: '用 CSS 省略号控制单行溢出，同时把完整文本放进 title，鼠标悬停即可看到全部内容，'
+            + '避免长 URL 把布局撑坏。'
+        },
+        {
+          text: '分页状态',
+          sentence: '每个标题的矩阵分页独立保存，切换别的标题不会把当前页重置。',
+          explanation: '数据页用 pageIndex[site] 记录标题列表的页码，用 matrixIndex[pageKey] 记录矩阵页码，'
+            + '两者互不影响。'
+        },
+        {
+          text: '存储配额',
+          sentence: '如果用户禁用了站点数据，storage.local 会抛错，数据页需要给出可读的失败提示。',
+          explanation: 'chrome.storage 可能因为企业策略、无痕模式限制或用户清除数据而写入失败。'
+            + '数据页在读取失败时显示 dataLoadFail，而不是静默空白。'
+        },
+        {
+          text: '悬停浮层',
+          sentence: '浮层锚定在格子下方，空间不足时自动翻转到上方，并限制在视口内。',
+          explanation: '浮层用 position: fixed 定位在格子附近，位置计算会做左右与上下夹取；'
+            + '鼠标移出格子和浮层后延时销毁节点，不在 DOM 里留下隐藏的残留。'
+        },
+        {
+          text: 'CJK 断词',
+          sentence: '中文长句没有空格，必须用 overflow-wrap: anywhere 才能安全换行。',
+          explanation: '中文与长 URL 一样没有天然断点，overflow-wrap: anywhere 允许在任意字符处换行，'
+            + '配合 min-width: 0 才能让网格子项不撑破容器。'
+        },
+        {
+          text: 'keyboard focus',
+          sentence: 'Every row is a real button, so Tab, Enter and Space work without extra handlers.',
+          explanation: '数据页的可点击行都用 <button>，键盘可聚焦，按 Enter/Space 触发与鼠标点击一致的行为，'
+            + '并用 :focus-visible 显示焦点环。'
+        },
+        {
+          text: 'prefers-reduced-motion',
+          sentence: 'Users who ask for reduced motion should not see the chevron or spinner animation.',
+          explanation: '系统开启「减少动态效果」时，通过 @media (prefers-reduced-motion: reduce) 把 transition/'
+            + 'animation 时长压到接近零。'
+        },
+        {
+          text: '深色主题',
+          sentence: '配色全部走 CSS 变量，深色模式只覆盖变量，不复制组件样式。',
+          explanation: '数据页与设置页共用 --pg-accent / --pg-bg / --pg-surface / --pg-fg / --pg-fg-dim / '
+            + '--pg-border 等 token，prefers-color-scheme: dark 下重定义变量即可。'
+        }
+      ];
+
+      var NOTE_SAMPLES = [
+        '重试策略必须建立在幂等之上，否则会重复扣款。',
+        '这里和设置页的 dataView 按钮对应，记得一起回归。',
+        'Read this again before changing the pagination constants.',
+        '检查深色模式下浮层阴影是否仍然可见；必要时调大 --pg-pop-shadow。',
+        'Long note: 这条笔记故意写长，用来验证笔记窗格在有限高度内可以独立滚动，并且不会把解释窗格挤到视口之外。'
+          + '再加一句，让内容超过六行，观察浮层的 max-height 与 overflow-y 是否正确生效。'
+      ];
+
+      function report(lines, isError) {
+        var text = Array.isArray(lines) ? lines.join('\n') : String(lines);
+        out.textContent = text;
+        out.classList.toggle('is-error', !!isError);
+      }
+
+      function sleep(ms) {
+        return new Promise(function (resolve) { setTimeout(resolve, ms); });
+      }
+
+      function explanationFor(index, isEnglish) {
+        if (isEnglish) {
+          return 'Sample explanation #' + index + ': this mark exists to test English wrapping, the hover panel '
+            + 'and the note column.' + LONG_TAIL;
+        }
+        return '示例解释 #' + index + '：这条标注用来验证中文长文本换行、悬停浮层与笔记栏。' + LONG_TAIL;
+      }
+
+      function makeAnnotation(pageIndex, index, spec) {
+        var now = Date.now();
+        var createdAt = now - (((pageIndex + 1) * 7 + index) * 61 * 60 * 1000);
+        var updatedAt = createdAt + 20 * 60 * 1000;
+        var note = spec.note || '';
+        return {
+          id: S.uuid(),
+          text: spec.text,
+          color: COLORS[(pageIndex + index) % COLORS.length],
+          sentence: spec.sentence || spec.text,
+          explanation: spec.explanation == null ? explanationFor(index, spec.en) : spec.explanation,
+          note: note,
+          noteUpdatedAt: note ? updatedAt + 3 * 60 * 1000 : 0,
+          createdAt: createdAt,
+          updatedAt: updatedAt,
+          marks: 1 + (index % 3),
+          anchors: []
+        };
+      }
+
+      function buildAnnotations(count, pageIndex) {
+        var list = [];
+        for (var i = 0; i < count; i++) {
+          var spec = SAMPLES[(pageIndex + i) % SAMPLES.length];
+          var note = '';
+          if (i === 1) note = NOTE_SAMPLES[(pageIndex + i) % NOTE_SAMPLES.length];
+          else if (i === 4) note = NOTE_SAMPLES[(pageIndex + i) % NOTE_SAMPLES.length];
+          var text = spec.text;
+          if (i % 17 === 2) text = spec.text + '：' + LONG_TAIL;
+          list.push(makeAnnotation(pageIndex, i, {
+            text: text,
+            sentence: spec.sentence,
+            explanation: spec.explanation,
+            note: note,
+            en: !S.hasChinese(spec.text)
+          }));
+        }
+        return list;
+      }
+
+      function makePage(url, title, annotations, chats) {
+        return {
+          urlKey: S.normalizeUrlKey(url),
+          url: url,
+          title: title,
+          updatedAt: Date.now(),
+          annotations: annotations,
+          chats: chats || {}
+        };
+      }
+
+      function buildPages() {
+        var pages = [];
+        var titles = [
+          '60 条标注：矩阵 5 × 10 分页与长文本截断',
+          'Designing a zero-build MV3 extension',
+          '第 3 篇：chrome.storage.local 的索引设计',
+          'Idempotent retries and safe PUT semantics',
+          '长标题测试：这一行故意写得非常长，用来检查窄屏下的省略号与完整 title 提示是否正常',
+          'Boundary conditions in a 5 × 10 matrix',
+          '第 7 篇：中文、English 与 mixed 内容混排',
+          'Keyboard focus, Escape and reduced motion',
+          '第 9 篇：深色主题下的对比度',
+          'Pagination state per page, not per site',
+          '第 11 篇：浮层翻转与视口限制',
+          'Notes everywhere: 一段很长的笔记样本'
+        ];
+        var counts = [60, 3, 6, 4, 5, 3, 6, 4, 5, 3, 6, 4];
+
+        for (var i = 0; i < titles.length; i++) {
+          var number = ('0' + (i + 1)).slice(-2);
+          pages.push(makePage(
+            'https://demo.example.com/articles/' + number,
+            titles[i],
+            buildAnnotations(counts[i], i),
+            {}
+          ));
+        }
+
+        pages.push(makePage(
+          'https://docs.example.org/guide/installation',
+          'Installation: load unpacked and reload',
+          buildAnnotations(4, 20),
+          {}
+        ));
+        var architecture = buildAnnotations(5, 21);
+        architecture[3].explanation = '';
+        pages.push(makePage(
+          'https://docs.example.org/guide/architecture',
+          'Architecture: storage, background and content scripts',
+          architecture,
+          {}
+        ));
+
+        var reading = buildAnnotations(6, 30);
+        var fallback = reading[0];
+        fallback.explanation = '';
+        var chats = {};
+        chats[fallback.id] = [
+          { role: 'user', content: 'Explain this mark', at: Date.now() - 120000 },
+          {
+            role: 'assistant',
+            content: '这条解释只存在于对话记录里：数据页在没有 annotation.explanation 时，会回退到第一条 assistant 消息。',
+            at: Date.now() - 60000
+          }
+        ];
+        pages.push(makePage(
+          'https://www.zh.example.net/notes/2026/reading',
+          '阅读笔记：中文、English 与长文本混排',
+          reading,
+          chats
+        ));
+
+        pages.push(makePage(
+          'https://zh.example.net/notes/2026/language',
+          '多语言与排版观察',
+          buildAnnotations(5, 31),
+          {}
+        ));
+
+        return pages;
+      }
+
+      function countAnnotations(pages) {
+        var total = 0;
+        pages.forEach(function (page) {
+          total += page.annotations.length;
+        });
+        return total;
+      }
+
+      function countSites(pages) {
+        var seen = {};
+        var total = 0;
+        pages.forEach(function (page) {
+          var key = S.siteGroupOf(page.url);
+          if (!seen[key]) {
+            seen[key] = true;
+            total++;
+          }
+        });
+        return total;
+      }
+
+      function refreshCurrent() {
+        return Store.getAllPages().then(function (pages) {
+          current.textContent = '当前缓存：' + pages.length + ' 个页面 · ' +
+            countAnnotations(pages) + ' 条标注 · ' + countSites(pages) + ' 个站点';
+        }).catch(function (err) {
+          current.textContent = '读取当前缓存失败：' + ((err && err.message) || String(err));
+        });
+      }
+
+      async function seed() {
+        seedBtn.disabled = true;
+        clearBtn.disabled = true;
+        report('正在写入…', false);
+        try {
+          var before = await Store.get(S.STORAGE_INDEX_KEY);
+          var beforeIndex = before && before[S.STORAGE_INDEX_KEY] ? before[S.STORAGE_INDEX_KEY] : {};
+          var beforePages = Object.keys(beforeIndex).length;
+          var pages = buildPages();
+          for (var i = 0; i < pages.length; i++) {
+            await Store.savePage(pages[i]);
+            await sleep(12);
+          }
+          var annotations = countAnnotations(pages);
+          report([
+            '写入完成。',
+            '站点：' + countSites(pages) + ' · 页面：' + pages.length + ' · 标注：' + annotations,
+            '覆盖：1 个站点 ' + 12 + ' 个页面（标题每页 10 行 · 需要翻页）、1 个页面 60 条标注（矩阵 5 × 10 · 需要翻页）、',
+            '      带笔记 / 无笔记 / 长文本 / 中英混排 / explanation 为空但有 assistant 对话（浮层回退）。',
+            '写入前的索引：' + beforePages + ' 个页面。'
+          ], false);
+          await refreshCurrent();
+        } catch (err) {
+          report('写入失败：' + ((err && err.message) || String(err)), true);
+        } finally {
+          seedBtn.disabled = false;
+          clearBtn.disabled = false;
+        }
+      }
+
+      async function clearAll() {
+        seedBtn.disabled = true;
+        clearBtn.disabled = true;
+        report('正在清空…', false);
+        try {
+          var removed = await Store.clearAll();
+          report('已清空全部数据（移除 ' + removed + ' 个存储键）。', false);
+          await refreshCurrent();
+        } catch (err) {
+          report('清空失败：' + ((err && err.message) || String(err)), true);
+        } finally {
+          seedBtn.disabled = false;
+          clearBtn.disabled = false;
+        }
+      }
+
+      seedBtn.addEventListener('click', seed);
+      clearBtn.addEventListener('click', clearAll);
+      refreshCurrent();
+    })();
+  </script>
+</body>
+</html>
