@@ -221,7 +221,8 @@
         id: annotation.id,
         text: annotation.text == null ? '' : String(annotation.text),
         color: annotation.color,
-        marks: annotation.marks
+        marks: annotation.marks,
+        stale: annotation.stale === true
       };
     });
     var payload = { url: tabUrl(), annotations: annotations, updatedAt: Date.now() };
@@ -287,14 +288,20 @@
     text.className = 'note-text';
     text.textContent = annotation.text;
     text.title = annotation.text;
-    text.addEventListener('click', function () {
-      sendToTab({ type: 'pg:focusAnnotation', annotationId: annotation.id }).then(function () {
-        window.close();
+    var stale = annotation.stale === true;
+    if (stale) {
+      // The mark is gone from the page: keep the row for the note, but make it
+      // clear it cannot be jumped to any more.
+      item.classList.add('is-stale');
+      text.setAttribute('aria-disabled', 'true');
+      text.title = t('dataStaleHint');
+    } else {
+      text.addEventListener('click', function () {
+        sendToTab({ type: 'pg:focusAnnotation', annotationId: annotation.id }).then(function () {
+          window.close();
+        });
       });
-    });
-    var meta = document.createElement('span');
-    meta.className = 'note-meta';
-    meta.textContent = '×' + (Number(annotation.marks) || 0);
+    }
     var remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'icon-btn';
@@ -306,7 +313,13 @@
     });
     item.appendChild(swatch);
     item.appendChild(text);
-    item.appendChild(meta);
+    if (stale) {
+      var staleTag = document.createElement('span');
+      staleTag.className = 'stale-tag';
+      staleTag.textContent = t('dataStale');
+      staleTag.title = t('dataStaleHint');
+      item.appendChild(staleTag);
+    }
     item.appendChild(remove);
     return item;
   }

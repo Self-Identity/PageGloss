@@ -49,6 +49,7 @@
     pageIndex: Object.create(null),
     matrixIndex: Object.create(null),
     selection: emptySelection(),
+    selectMode: false,
     loading: false,
     loadToken: 0,
     working: false,
@@ -74,6 +75,10 @@
     clearSelection: null,
     exportSelected: null,
     deleteSelected: null,
+    selectMode: null,
+    importData: null,
+    importFile: null,
+    selectionBar: null,
     toasts: null
   };
 
@@ -139,6 +144,8 @@
       onChange(!!input.checked);
     });
     wrap.appendChild(input);
+    // Rendered only in select mode; the input is also used for the half-state.
+    wrap.input = input;
     return wrap;
   }
 
@@ -265,19 +272,82 @@
     return !!(map && map[annotationId]);
   }
 
+  /** "all" | "some" | "none" for a page, used for checkbox half states. */
+  function pageSelectionState(page) {
+    var key = pageKeyOf(page);
+    var ids = Object.keys(annotationIdsOf(page));
+    var map = state.selection.anns[key] || {};
+    var picked = ids.filter(function (id) { return !!map[id]; }).length;
+    if (ids.length && picked === ids.length) return 'all';
+    if (picked > 0) return 'some';
+    return state.selection.pages[key] ? 'all' : 'none';
+  }
+
+  function siteSelectionState(group) {
+    var pages = group && Array.isArray(group.pages) ? group.pages : [];
+    var states = pages.map(pageSelectionState);
+    if (states.length && states.every(function (s) { return s === 'all'; })) return 'all';
+    if (states.some(function (s) { return s !== 'none'; })) return 'some';
+    return state.selection.sites[group.key] ? 'all' : 'none';
+  }
+
+  function groupByKey(key) {
+    for (var i = 0; i < state.groups.length; i++) {
+      if (state.groups[i].key === key) return state.groups[i];
+    }
+    return null;
+  }
+
+  function pageByKey(key) {
+    for (var i = 0; i < state.pages.length; i++) {
+      if (pageKeyOf(state.pages[i]) === key) return state.pages[i];
+    }
+    return null;
+  }
+
+  /** Selecting a site selects every page and mark below it. */
   function setSiteSelected(groupKey, selected) {
-    if (selected) state.selection.sites[groupKey] = true;
-    else delete state.selection.sites[groupKey];
+    var group = groupByKey(groupKey);
+    if (selected) {
+      state.selection.sites[groupKey] = true;
+      if (group) {
+        group.pages.forEach(function (page) {
+          var key = pageKeyOf(page);
+          state.selection.pages[key] = true;
+          var ids = annotationIdsOf(page);
+          if (Object.keys(ids).length) state.selection.anns[key] = ids;
+        });
+      }
+    } else {
+      delete state.selection.sites[groupKey];
+      if (group) {
+        group.pages.forEach(function (page) {
+          var key = pageKeyOf(page);
+          delete state.selection.pages[key];
+          delete state.selection.anns[key];
+        });
+      }
+    }
+    syncParents();
     render();
   }
 
+  /** Selecting a page selects all of its marks. */
   function setPageSelected(page, selected) {
     var key = pageKeyOf(page);
-    if (selected) state.selection.pages[key] = true;
-    else delete state.selection.pages[key];
+    if (selected) {
+      state.selection.pages[key] = true;
+      var ids = annotationIdsOf(page);
+      if (Object.keys(ids).length) state.selection.anns[key] = ids;
+    } else {
+      delete state.selection.pages[key];
+      delete state.selection.anns[key];
+    }
+    syncParents();
     render();
   }
 
+  /** Marks bubble up: a fully selected page selects its site. */
   function setAnnotationSelected(pageKey, annotationId, selected) {
     var map = state.selection.anns[pageKey];
     if (selected) {
@@ -287,6 +357,33 @@
       delete map[annotationId];
       if (!Object.keys(map).length) delete state.selection.anns[pageKey];
     }
+    var page = pageByKey(pageKey);
+    if (page) {
+      var ids = Object.keys(annotationIdsOf(page));
+      var chosen = state.selection.anns[pageKey] || {};
+      var all = ids.length > 0 && ids.every(function (id) { return !!chosen[id]; });
+      if (all) state.selection.pages[pageKey] = true;
+      else delete state.selection.pages[pageKey];
+    }
+    syncParents();
+    render();
+  }
+
+  function syncParents() {
+    state.groups.forEach(function (group) {
+      var pages = group.pages || [];
+      var all = pages.length > 0 && pages.every(function (page) {
+        return !!state.selection.pages[pageKeyOf(page)];
+      });
+      if (all) state.selection.sites[group.key] = true;
+      else delete state.selection.sites[group.key];
+    });
+  }
+
+  /** Checkboxes only appear in select mode, and leaving it clears the picks. */
+  function toggleSelectMode() {
+    state.selectMode = !state.selectMode;
+    state.selection = emptySelection();
     render();
   }
 
@@ -424,6 +521,8 @@
     dom.clearSelection.textContent = t('dataClearSelection');
     dom.exportSelected.textContent = t('dataExportSelected');
     dom.deleteSelected.textContent = t('dataDeleteSelected');
+    dom.selectMode.textContent = t('dataSelectMode');
+    dom.importData.textContent = t('dataImport');
     // The allowed key set has no dedicated "refresh" label, so the icon-only
     // button reuses the page title as its accessible name.
     dom.refresh.setAttribute('aria-label', t('dataPageTitle'));
@@ -457,11 +556,20 @@
   function updateToolbar() {
     var totals = selectionTotals();
     var count = totals.count;
+    var selecting = !!state.selectMode;
+    dom.selectionBar.hidden = !selecting;
     dom.selectionCount.textContent = t('dataSelectionCount', { n: count });
-    dom.exportSelected.hidden = count === 0;
+    dom.selectAll.hidden = !selecting;
+    dom.clearSelection.hidden = !selecting;
+    dom.deleteSelected.hidden = !selecting;
+    dom.exportSelected.hidden = !selecting || count === 0;
     dom.clearSelection.disabled = count === 0 || state.working;
     dom.deleteSelected.disabled = count === 0 || state.working;
     dom.selectAll.disabled = state.loading || state.working || !state.groups.length;
+    dom.selectMode.textContent = selecting ? t('dataSelectModeOn') : t('dataSelectMode');
+    dom.selectMode.setAttribute('aria-pressed', selecting ? 'true' : 'false');
+    dom.selectMode.disabled = state.working;
+    dom.importData.disabled = state.working;
   }
 
   /* ------------------------------------------------------------------ toast */
@@ -513,6 +621,7 @@
 
   function render() {
     closeOverlay();
+    document.body.classList.toggle('select-mode', !!state.selectMode);
     var scrollTop = dom.content.scrollTop;
     dom.sites.textContent = '';
     renderStats();
@@ -535,12 +644,14 @@
     var section = el('section', 'site');
     var head = el('div', 'site-head');
 
-    head.appendChild(checkbox(
+    var siteCheck = checkbox(
       'site-check',
-      !!state.selection.sites[group.key],
+      siteSelectionState(group) === 'all',
       siteLabel(group.key),
       function (checked) { setSiteSelected(group.key, checked); }
-    ));
+    );
+    if (siteSelectionState(group) === 'some') siteCheck.input.indeterminate = true;
+    head.appendChild(siteCheck);
 
     var toggle = button('site-toggle');
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -604,12 +715,14 @@
     var article = el('article', 'page');
     var row = el('div', 'page-row');
 
-    row.appendChild(checkbox(
+    var pageCheck = checkbox(
       'page-check',
-      !!state.selection.pages[key],
+      pageSelectionState(page) === 'all',
       label,
       function (checked) { setPageSelected(page, checked); }
-    ));
+    );
+    if (pageSelectionState(page) === 'some') pageCheck.input.indeterminate = true;
+    row.appendChild(pageCheck);
 
     var toggle = button('page-toggle');
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -790,6 +903,20 @@
     openUrl(base + '#pg-focus=' + encodeURIComponent(String(annotation.id)));
   }
 
+  /** Open the same full page reader tab the in-page card opens. */
+  function openFullpage(page, annotation) {
+    var key = pageKeyOf(page);
+    var id = annotation && annotation.id ? String(annotation.id) : '';
+    if (!key || !id) return;
+    var url = chrome.runtime.getURL('src/fullpage/fullpage.html') +
+      '?key=' + encodeURIComponent(key) + '&id=' + encodeURIComponent(id);
+    try {
+      chrome.tabs.create({ url: url });
+    } catch (err) {
+      openUrl(url);
+    }
+  }
+
   /* ----------------------------------------------------------------- deletion */
 
   function messageOf(err) {
@@ -912,6 +1039,78 @@
     askDelete(1, function () {
       runDelete({ pageKeys: [key], annsByPage: {} });
     });
+  }
+
+  /* ------------------------------------------------------------------- import */
+
+  /**
+   * Merge a pagegloss-backup file into the cache.
+   *
+   * Pages merge by URL key and annotations by id. A mark whose text AND
+   * explanation are already present is skipped, so re-importing the same file
+   * twice never duplicates entries.
+   */
+  function importData(file) {
+    if (state.working) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var payload;
+      try {
+        payload = JSON.parse(String(reader.result || ''));
+      } catch (err) {
+        toast(t('dataImportFail', { s: t('errUnknown') }), true);
+        return;
+      }
+      if (!payload || payload.format !== 'pagegloss-backup' || !payload.pages || typeof payload.pages !== 'object') {
+        toast(t('dataImportFail', { s: t('errUnknown') }), true);
+        return;
+      }
+      state.working = true;
+      setRefreshBusy(true);
+      updateToolbar();
+      var imported = 0;
+      var touched = 0;
+      var chain = Promise.resolve();
+      Object.keys(payload.pages).forEach(function (key) {
+        chain = chain.then(function () {
+          return Store.getPage(key).then(function (existing) {
+            var incoming = Store.sanitizePage(payload.pages[key], key);
+            var changed = false;
+            incoming.annotations.forEach(function (annotation) {
+              var duplicate = existing.annotations.some(function (old) {
+                if (old.id && annotation.id && old.id === annotation.id) return true;
+                return String(old.text) === String(annotation.text) &&
+                  String(old.explanation || '') === String(annotation.explanation || '');
+              });
+              if (duplicate) return;
+              existing.annotations.push(annotation);
+              imported += 1;
+              changed = true;
+            });
+            if (!existing.title && incoming.title) existing.title = incoming.title;
+            if (!existing.url && incoming.url) existing.url = incoming.url;
+            if (!changed) return null;
+            touched += 1;
+            return Store.savePage(existing);
+          });
+        });
+      });
+      chain.then(function () {
+        state.working = false;
+        setRefreshBusy(false);
+        toast(imported ? t('dataImportOk', { n: touched }) : t('dataImportEmpty'));
+        return load();
+      }).catch(function (err) {
+        state.working = false;
+        setRefreshBusy(false);
+        updateToolbar();
+        toast(t('dataImportFail', { s: messageOf(err) }), true);
+      });
+    };
+    reader.onerror = function () {
+      toast(t('dataImportFail', { s: t('errUnknown') }), true);
+    };
+    reader.readAsText(file);
   }
 
   /* ------------------------------------------------------------------- export */
@@ -1173,6 +1372,16 @@
     if (!card.host.isConnected) {
       (document.body || document.documentElement).appendChild(card.host);
     }
+    if (typeof card.setHandlers === 'function') {
+      // The read-only card keeps the fullscreen button: it opens the same
+      // reader tab as the in-page card does.
+      card.setHandlers({
+        onFullscreen: function () {
+          closeOverlay();
+          openFullpage(page, annotation);
+        }
+      });
+    }
     return card;
   }
 
@@ -1302,7 +1511,20 @@
     dom.clearSelection = document.getElementById('clearSelection');
     dom.exportSelected = document.getElementById('exportSelected');
     dom.deleteSelected = document.getElementById('deleteSelected');
+    dom.selectMode = document.getElementById('selectMode');
+    dom.importData = document.getElementById('importData');
+    dom.importFile = document.getElementById('importFile');
+    dom.selectionBar = document.getElementById('selectionBar');
     dom.toasts = document.getElementById('toasts');
+    dom.selectMode.addEventListener('click', toggleSelectMode);
+    dom.importData.addEventListener('click', function () {
+      if (dom.importFile) dom.importFile.click();
+    });
+    dom.importFile.addEventListener('change', function (event) {
+      var file = event.target.files && event.target.files[0];
+      dom.importFile.value = '';
+      if (file) importData(file);
+    });
     applyLabels();
     updateToolbar();
     wire();

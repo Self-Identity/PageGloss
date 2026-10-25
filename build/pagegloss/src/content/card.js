@@ -433,10 +433,10 @@
     var menuAll = card.querySelector('.menu-item[data-action="all"]');
 
     if (readOnly) {
-      // A read-only card is a viewer: no ask box, pin, unmark or fullscreen.
+      // A read-only card is a viewer: no ask box, pin or unmark. The fullscreen
+      // button stays because the data page opens the same reader tab with it.
       foot.hidden = true;
       unmarkButton.hidden = true;
-      fullscreenButton.hidden = true;
       card.querySelector('.pin').hidden = true;
       menu.hidden = true;
       card.setAttribute('aria-readonly', 'true');
@@ -1222,7 +1222,9 @@
     body.scrollTop = 0;
     autoScroll = true;
     initializing = false;
-    if (readOnly) showNote();
+    // A card that already carries a note opens both panes right away; an empty
+    // note pane stays hidden until the reader hovers the card.
+    if (readOnly || (noteText.value && noteText.value.trim())) showNote();
 
     return api;
   }

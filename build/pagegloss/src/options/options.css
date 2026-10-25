@@ -399,6 +399,20 @@ textarea:focus {
   }
 }
 
+/*
+ * The data card looked tighter than the cards above it; give it a little more
+ * vertical room and push the action row to the bottom.
+ */
+#dataCard {
+  display: flex;
+  flex-direction: column;
+  min-height: 236px;
+}
+
+#dataCard .button-row {
+  margin-top: auto;
+}
+
 /* Matching rule radio group (options page) */
 .modes {
   display: flex;

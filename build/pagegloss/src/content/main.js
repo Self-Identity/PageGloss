@@ -1613,24 +1613,78 @@
       if (anchors.length || Number(annotation.marks) > 0) previouslyMarked[annotation.id] = true;
     });
 
+    // One text map serves the whole restore pass. Each annotation is verified
+    // against the current page text before it is drawn again: a page whose
+    // content changed must not keep highlighting text that is no longer there,
+    // otherwise the marks sit on unrelated words and contradict their notes.
+    var pageMap = M.buildTextMap(document.body);
     state.annotations.forEach(function (annotation) {
+      var needle = M.normalizeNeedle(annotation.text);
       var ranges = M.rangesFromAnchors(annotation).slice(0, S.MAX_MARKS_PER_ANNOTATION);
-      if (!ranges.length) {
-        annotation.marks = 0;
-        annotation.anchors = [];
-        return;
-      }
-      var map = M.buildTextMap(document.body);
-      var offsets = M.offsetsForRanges(map, ranges, {
-        annotationId: annotation.id,
-        color: annotation.color,
-        secondary: false
+      var offsets = ranges.length
+        ? M.offsetsForRanges(pageMap, ranges, {
+          annotationId: annotation.id,
+          color: annotation.color,
+          secondary: false
+        })
+        : [];
+      // Keep only the ranges whose current text is still the marked text. Some
+      // engines report an end offset one short at a node boundary, so accept the
+      // one-character extension and use it when it matches exactly.
+      var verified = [];
+      offsets.forEach(function (offset) {
+        var raw = pageMap.raw;
+        var candidates = [
+          raw.slice(offset.start, offset.end),
+          raw.slice(offset.start, Math.min(offset.end + 1, raw.length))
+        ];
+        for (var i = 0; i < candidates.length; i++) {
+          if (M.normalizeNeedle(candidates[i]) !== needle) continue;
+          var next = { start: offset.start, end: offset.end };
+          if (i === 1) next.end = Math.min(offset.end + 1, raw.length);
+          next.annotationId = offset.annotationId;
+          next.color = offset.color;
+          next.secondary = offset.secondary;
+          verified.push(next);
+          return;
+        }
       });
+      offsets = verified;
+      // Keep only the ranges whose current text is still the marked text. The
+      // offsets index map.raw, so slicing it avoids depending on Range.toString
+      // (which differs between engines and test stubs).
+      offsets = offsets.filter(function (offset) {
+        try {
+          return M.normalizeNeedle(pageMap.raw.slice(offset.start, offset.end)) === needle;
+        } catch (err) {
+          return false;
+        }
+      });
+      if (!offsets.length && needle) {
+        // No usable anchors left; look the text up again before giving up.
+        var found = M.findMatches(pageMap, needle, { wholeWord: false, limit: S.MAX_MARKS_PER_ANNOTATION });
+        offsets = M.mergeRanges(found.map(function (match) {
+          return {
+            start: match.start,
+            end: match.end,
+            annotationId: annotation.id,
+            color: annotation.color,
+            secondary: false
+          };
+        }));
+      }
       if (!offsets.length) {
         annotation.marks = 0;
+        annotation.anchors = [];
+        if (needle) {
+          annotation.stale = true;
+          annotation.staleAt = Number(annotation.staleAt) || Date.now();
+        }
         return;
       }
-      annotation.marks = M.applyRanges(map, offsets);
+      delete annotation.stale;
+      delete annotation.staleAt;
+      annotation.marks = M.applyRanges(pageMap, offsets);
     });
     saveAnnotationsDebounced();
   }

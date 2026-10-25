@@ -25,6 +25,9 @@
       </div>
 
       <div class="actions">
+        <button class="btn" id="selectMode" type="button" aria-pressed="false"></button>
+        <button class="btn" id="importData" type="button"></button>
+        <input type="file" id="importFile" accept=".json,application/json" hidden>
         <button class="btn" id="expandAll" type="button">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
             <path d="M7 7l5 5 5-5"></path>
@@ -51,10 +54,10 @@
     <div class="selection-bar" id="selectionBar">
       <p class="selection-count" id="selectionCount" role="status" aria-live="polite"></p>
       <div class="selection-actions">
-        <button class="btn" id="selectAll" type="button"></button>
-        <button class="btn" id="clearSelection" type="button"></button>
+        <button class="btn" id="selectAll" type="button" hidden></button>
+        <button class="btn" id="clearSelection" type="button" hidden></button>
         <button class="btn" id="exportSelected" type="button" hidden></button>
-        <button class="btn btn-danger" id="deleteSelected" type="button"></button>
+        <button class="btn btn-danger" id="deleteSelected" type="button" hidden></button>
       </div>
     </div>
 

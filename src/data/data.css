@@ -278,6 +278,11 @@ body {
   outline-offset: 1px;
 }
 
+/* Multi-select is a mode: the checkboxes stay hidden until it is entered. */
+body:not(.select-mode) .check {
+  display: none;
+}
+
 /* ------------------------------------------------------------- icon buttons */
 
 .btn-icon-sm {

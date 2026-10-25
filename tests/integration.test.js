@@ -343,6 +343,17 @@ function queryAll(root, selector) {
 
 /** Build the canned body markup. kind: 'words' for the word-boundary fixture. */
 function parseBody(document, kind) {
+  if (kind === 'changed') {
+    // Same URL, completely different article: cached annotations must not be
+    // drawn over unrelated words (the reported misalignment bug).
+    const changedRoot = new Element('div');
+    changedRoot.setAttribute('id', 'pg-root');
+    const paragraph = new Element('p');
+    paragraph.setAttribute('id', 'pg-changed');
+    paragraph.appendChild(new TextNode('A rewritten article about something else entirely.'));
+    changedRoot.appendChild(paragraph);
+    return changedRoot;
+  }
   if (kind === 'words') {
     const wordRoot = new Element('div');
     wordRoot.setAttribute('id', 'pg-root');
@@ -950,6 +961,28 @@ async function main() {
     assertEqual(count, 1, 'one page imported');
     const restored = await Store.getPage('https://example.com/a');
     assertEqual(restored.annotations[0].note, 'kept', 'note survives export and import');
+  });
+
+  await test('a rewritten page does not restore misaligned marks', async () => {
+    const env = bootContent();
+    await waitFor(() => env.sandbox.window.__pagegloss.state.settings);
+    env.sandbox.window.__pagegloss.mark({
+      text: 'hello world',
+      anchorElement: env.document.body.childNodes[0].childNodes[0].childNodes[0],
+      sentence: 'hello world'
+    });
+    await waitFor(() => marksIn(env.document).length === 2);
+    const key = env.sandbox.window.__pagegloss.state.urlKey;
+    await waitFor(() => env.store.data.has('pg:page:' + key));
+
+    // The same URL now serves different text.
+    const restarted = bootContentWithStore(env.store, 'changed');
+    await waitFor(() => restarted.sandbox.window.__pagegloss.state.annotations.length > 0, 2000);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assertEqual(marksIn(restarted.document).length, 0, 'nothing is highlighted on unrelated text');
+    const annotation = restarted.sandbox.window.__pagegloss.state.annotations[0];
+    assertEqual(annotation.stale, true, 'the cached annotation is flagged as stale');
+    assertEqual(annotation.marks, 0, 'no live marks are reported');
   });
 
   const failed = results.filter((item) => !item.ok);
