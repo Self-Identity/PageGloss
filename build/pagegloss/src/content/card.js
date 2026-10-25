@@ -3,10 +3,17 @@
  * Shows the LLM explanation of the marked term and lets the user keep asking
  * follow-up questions, either inline (hover) or pinned as a floating window.
  *
- * Layout: the main card plus a note pane on the right, inside one flex shell
- * (stacked vertically on narrow viewports). The note pane starts hidden and is
- * revealed after the pointer rests on the card, while the card is pinned, or
- * while the note textarea is focused / not empty.
+ * Layout: the card is the only in-flow element. The note pane is an absolutely
+ * positioned overlay to the right of the card (falling back to the left and
+ * then below when the viewport is too narrow), so opening it never changes the
+ * card's width or internal layout. The note pane starts hidden and is revealed
+ * after the pointer rests on the card, while the card is pinned, or while the
+ * note textarea is focused / not empty.
+ *
+ * create({ readOnly: true }) renders a static explanation/note view for reuse
+ * outside the page content script (for example the data overview page). It
+ * keeps the same lifecycle API but never renders the ask box, pin, unmark or
+ * fullscreen controls, and it cannot start a network request.
  */
 (function () {
   'use strict';
@@ -22,20 +29,15 @@
     '  --pg-accent: #2f6fed; --pg-accent-soft: rgba(47,111,237,.12); --pg-accent-border: #a9c2fb;',
     '  --pg-danger: #b42318; --pg-danger-soft: rgba(180,35,24,.1); --pg-danger-border: #f3b3ad;',
     '}',
-    ':host(.note-open) { width: min(660px, calc(100% - 16px)); }',
-    '@media (max-width: 899px) {',
-    '  :host(.note-open) { width: min(392px, calc(100% - 16px)); }',
-    '}',
     '* { box-sizing: border-box; }',
     '.shell {',
-    '  display: flex; flex-direction: row; align-items: stretch; gap: 8px;',
+    '  position: relative; display: block;',
     '  width: 100%; min-width: 0; max-height: calc(100vh - 16px);',
     '  opacity: 1; transform: none; transition: opacity .15s ease, transform .15s ease;',
     '}',
     '.shell.leaving { opacity: 0; transform: translateY(6px); }',
-    '@media (max-width: 899px) { .shell { flex-direction: column; } }',
     '.card {',
-    '  width: min(392px, calc(100% - 16px)); flex: 0 1 auto;',
+    '  width: 100%; max-width: 100%;',
     '  max-height: min(70vh, 560px);',
     '  display: flex; flex-direction: column; min-width: 0; min-height: 0;',
     '  font: 13px/1.62 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;',
@@ -49,7 +51,8 @@
     '.card.leaving { opacity: 0; transform: translateY(6px); }',
     '@keyframes pg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }',
     '.note {',
-    '  flex: 0 0 260px; width: 260px; max-width: 100%;',
+    '  position: absolute; z-index: 3; top: 0; left: 0;',
+    '  width: min(260px, 100%); max-width: 100%;',
     '  display: flex; flex-direction: column; gap: 6px;',
     '  min-width: 0; min-height: 0; max-height: min(70vh, 560px);',
     '  padding: 10px 12px;',
@@ -58,11 +61,18 @@
     '  border: 1px solid var(--pg-border); border-radius: 14px;',
     '  box-shadow: 0 18px 48px rgba(15, 23, 42, .2), 0 2px 8px rgba(15, 23, 42, .1);',
     '  overflow: hidden;',
-    '  transition: opacity .15s ease, transform .15s ease;',
+    '  opacity: 0; visibility: hidden; pointer-events: none;',
+    '  transform: translateX(-4px);',
+    '  transition: opacity 150ms ease-out, transform 150ms ease-out, visibility 0s linear 150ms;',
     '}',
-    '.note[hidden] { display: none; }',
-    '.note.leaving { opacity: 0; transform: translateY(6px); }',
-    '@media (max-width: 899px) { .note { flex: 0 0 auto; width: 100%; max-height: min(50vh, 320px); } }',
+    '.note.right { left: calc(100% + 12px); right: auto; top: 0; }',
+    '.note.left { left: auto; right: calc(100% + 12px); top: 0; }',
+    '.note.below { left: 0; right: auto; top: calc(100% + 10px); width: 100%; max-width: 100%; }',
+    '.note.note-visible {',
+    '  opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(0);',
+    '  transition: opacity 150ms ease-out, transform 150ms ease-out, visibility 0s linear 0s;',
+    '}',
+    '.note.leaving { opacity: 0; transform: translateX(-4px); }',
     '.note-title {',
     '  flex-shrink: 0; font-size: 10.5px; font-weight: 680; letter-spacing: .05em;',
     '  text-transform: uppercase; color: var(--pg-fg-dim); white-space: nowrap;',
@@ -75,6 +85,7 @@
     '  line-height: 1.5; overflow-wrap: anywhere;',
     '}',
     'textarea.note-text:focus { outline: none; border-color: var(--pg-accent-border); box-shadow: 0 0 0 2px var(--pg-accent-soft); }',
+    'textarea.note-text[readonly] { resize: none; cursor: default; }',
     '.note-saved {',
     '  flex-shrink: 0; min-height: 14px; font-size: 11px; color: var(--pg-accent);',
     '  opacity: 0; transition: opacity .2s ease; white-space: nowrap;',
@@ -83,13 +94,14 @@
     '.note-saved.leaving { opacity: 0; }',
     '@media (prefers-reduced-motion: reduce) {',
     '  .shell, .card, .note { transition: none !important; }',
-    '  .shell.leaving, .card.leaving, .note.leaving { transform: none; }',
+    '  .shell.leaving, .card.leaving, .note.leaving, .note { transform: none; }',
     '}',
     '.head {',
     '  display: flex; align-items: center; gap: 8px; flex-shrink: 0;',
     '  padding: 10px 10px 10px 12px; border-bottom: 1px solid var(--pg-border);',
     '  background: var(--pg-head);',
-    '}',    '.dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(15,23,42,.12); }',
+    '}',
+    '.dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(15,23,42,.12); }',
     '.term {',
     '  flex: 1 1 auto; min-width: 0; font-weight: 650; font-size: 13.5px;',
     '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;',
@@ -152,6 +164,7 @@
     '  text-transform: uppercase; margin-bottom: 3px; }',
     '.error-actions button { flex-shrink: 0; white-space: nowrap; }',
     '.foot { flex-shrink: 0; border-top: 1px solid var(--pg-border); padding: 8px; background: var(--pg-head); }',
+    '.foot[hidden], button[hidden] { display: none; }',
     '.row { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }',
     'textarea.ask {',
     '  flex: 1 1 auto; min-width: 0; resize: none; overflow-y: auto;',
@@ -242,7 +255,7 @@
       '      <div class="hint"></div>',
       '    </div>',
       '  </div>',
-      '  <aside class="note" hidden>',
+      '  <aside class="note right" aria-hidden="true">',
       '    <div class="note-title"></div>',
       '    <textarea class="note-text" rows="4" spellcheck="false"></textarea>',
       '    <div class="note-saved" role="status" aria-live="polite"></div>',
@@ -336,11 +349,14 @@
 
   function createCard(options) {
     var opts = options || {};
+    var readOnly = opts.readOnly === true;
     var position = opts.position || { x: 24, y: 24 };
     var host = document.createElement('pagegloss-ui');
     host.id = HOST_ID;
+    if (readOnly) host.setAttribute('data-readonly', 'true');
     // The width is inline because the page's `pagegloss-ui { all: initial }`
-    // reset outranks :host rules; it grows while the note pane is open.
+    // reset outranks :host rules. It never changes: the note is an overlay and
+    // must not widen the card or make it reflow.
     host.style.cssText = 'position:fixed;z-index:2147483600;left:' + Math.round(position.x) +
       'px;top:' + Math.round(position.y) + 'px;width:min(392px, calc(100% - 16px));';
     var shadow = host.attachShadow({ mode: 'open' });
@@ -357,8 +373,11 @@
 
     var card = shell.querySelector('.card');
     var body = card.querySelector('.body');
+    var foot = card.querySelector('.foot');
     var ask = card.querySelector('textarea.ask');
     var send = card.querySelector('.send');
+    var copyButton = card.querySelector('.copy');
+    var closeButton = card.querySelector('.close');
     var notePane = shell.querySelector('.note');
     var noteTitle = shell.querySelector('.note-title');
     var noteText = shell.querySelector('textarea.note-text');
@@ -370,27 +389,32 @@
     card.querySelector('.dot').style.background = opts.color || '#fff2a8';
     card.querySelector('.pin').title = t('cardPin');
     card.querySelector('.pin').setAttribute('aria-label', t('cardPin'));
-    card.querySelector('.copy').title = t('cardCopy');
-    card.querySelector('.copy').setAttribute('aria-label', t('cardCopy'));
+    copyButton.title = t('cardCopy');
+    copyButton.setAttribute('aria-label', t('cardCopy'));
     var fullscreenButton = card.querySelector('.fullscreen');
     fullscreenButton.title = t('cardFullscreen');
     fullscreenButton.setAttribute('aria-label', t('cardFullscreen'));
-    card.querySelector('.close').title = t('cardClose');
-    card.querySelector('.close').setAttribute('aria-label', t('cardClose'));
+    closeButton.title = t('cardClose');
+    closeButton.setAttribute('aria-label', t('cardClose'));
     send.textContent = t('cardSend');
     ask.placeholder = t('cardPlaceholder');
     card.querySelector('.hint').textContent = t('cardHint');
     noteTitle.textContent = t('cardNoteTitle');
-    noteText.placeholder = t('cardNotePlaceholder');
+    noteText.placeholder = readOnly ? '' : t('cardNotePlaceholder');
     noteText.value = String(opts.note == null ? '' : opts.note);
+    noteText.readOnly = readOnly;
+    if (readOnly) noteText.setAttribute('aria-readonly', 'true');
 
     var handlers = {};
     var streamHandle = null;
     var autoScroll = true;
+    var initializing = true;
+    var suppressScrollStateUntil = 0;
     var drag = null;
     var reasoningNode = null;
     var destroyed = false;
     var closing = false;
+    var resizeObserver = null;
 
     // Every timer is tracked so destroy() can never leave one behind.
     var noteShowTimer = 0;
@@ -407,6 +431,16 @@
     var menu = card.querySelector('.menu');
     var menuOne = card.querySelector('.menu-item[data-action="one"]');
     var menuAll = card.querySelector('.menu-item[data-action="all"]');
+
+    if (readOnly) {
+      // A read-only card is a viewer: no ask box, pin, unmark or fullscreen.
+      foot.hidden = true;
+      unmarkButton.hidden = true;
+      fullscreenButton.hidden = true;
+      card.querySelector('.pin').hidden = true;
+      menu.hidden = true;
+      card.setAttribute('aria-readonly', 'true');
+    }
 
     function closeMenu() {
       if (menu.hidden) return;
@@ -482,19 +516,61 @@
       return !!host.classList.contains('note-open');
     }
 
+    function viewportWidth() {
+      var root = document.documentElement;
+      var width = root && root.clientWidth ? root.clientWidth : 0;
+      return width || window.innerWidth || 0;
+    }
+
+    function viewportHeight() {
+      var root = document.documentElement;
+      var height = root && root.clientHeight ? root.clientHeight : 0;
+      return height || window.innerHeight || 0;
+    }
+
     /**
-     * Row layout needs room for card + note; below 900px the note stacks under
-     * the card, so the host keeps the single-card width.
+     * Choose where the note overlay goes without touching the card's layout:
+     * right when it fits, then left, then below. getBoundingClientRect() is the
+     * source of truth so dragging and viewport resizes are handled the same way.
      */
-    function applyHostWidth() {
-      var stacked = false;
-      try {
-        stacked = !!(window.matchMedia && window.matchMedia('(max-width: 899px)').matches);
-      } catch (err) {
-        stacked = false;
+    function placeNote() {
+      if (!notePane || destroyed) return;
+      var vw = viewportWidth();
+      if (!vw) return;
+      var vh = viewportHeight();
+      var rect = card.getBoundingClientRect();
+      var left = rect.width ? rect.left : parseFloat(host.style.left);
+      var top = rect.height ? rect.top : parseFloat(host.style.top);
+      if (!isFinite(left)) left = position.x;
+      if (!isFinite(top)) top = position.y;
+      var width = rect.width || host.offsetWidth || Math.min(392, Math.max(0, vw - 16));
+      var height = rect.height || host.offsetHeight || 0;
+      var right = left + width;
+      var bottom = top + height;
+      var noteWidth = Math.min(260, Math.max(0, width));
+
+      var gap = 12;
+      var margin = 8;
+      var placement;
+      if (right + gap + noteWidth <= vw - margin) {
+        placement = 'right';
+      } else if (left - gap - noteWidth >= margin) {
+        placement = 'left';
+      } else {
+        placement = 'below';
       }
-      var wide = noteOpen() && !stacked;
-      host.style.width = wide ? 'min(660px, calc(100% - 16px))' : 'min(392px, calc(100% - 16px))';
+      notePane.classList.toggle('right', placement === 'right');
+      notePane.classList.toggle('left', placement === 'left');
+      notePane.classList.toggle('below', placement === 'below');
+
+      var available;
+      if (placement === 'below') {
+        available = vh - Math.max(bottom, 0) - 10 - margin;
+      } else {
+        available = vh - Math.max(top, 0) - margin;
+      }
+      var maxHeight = Math.max(96, Math.min(560, available));
+      notePane.style.maxHeight = Math.round(maxHeight) + 'px';
     }
 
     function showNote() {
@@ -503,27 +579,44 @@
         window.clearTimeout(noteHideTimer);
         noteHideTimer = 0;
       }
-      if (noteOpen()) return;
       host.classList.add('note-open');
       notePane.hidden = false;
-      applyHostWidth();
-      // The host got wider; pull it back inside the viewport if needed.
-      reposition();
+      notePane.classList.remove('leaving');
+      placeNote();
+      if (!notePane.classList.contains('note-visible')) {
+        // Flush the initial hidden style so the first open animates.
+        void notePane.offsetWidth;
+        notePane.classList.add('note-visible');
+      }
+      notePane.setAttribute('aria-hidden', 'false');
     }
 
     function hideNote() {
+      if (readOnly) return;
       if (noteHideTimer) {
         window.clearTimeout(noteHideTimer);
         noteHideTimer = 0;
       }
       if (!noteOpen()) return;
-      notePane.hidden = true;
+      notePane.classList.remove('note-visible');
+      notePane.classList.remove('leaving');
       host.classList.remove('note-open');
-      applyHostWidth();
+      notePane.setAttribute('aria-hidden', 'true');
+    }
+
+    function cancelScheduledNoteShow() {
+      if (noteShowTimer) {
+        window.clearTimeout(noteShowTimer);
+        noteShowTimer = 0;
+      }
     }
 
     function scheduleNoteShow(delay) {
-      if (destroyed) return;
+      if (destroyed || readOnly) return;
+      if (noteHideTimer) {
+        window.clearTimeout(noteHideTimer);
+        noteHideTimer = 0;
+      }
       if (noteShowTimer) window.clearTimeout(noteShowTimer);
       noteShowTimer = window.setTimeout(function () {
         noteShowTimer = 0;
@@ -533,7 +626,9 @@
     }
 
     function scheduleNoteHide(delay) {
-      if (destroyed) return;
+      if (destroyed || readOnly) return;
+      // Leaving before the 200ms hover delay must cancel the pending reveal.
+      cancelScheduledNoteShow();
       if (noteHideTimer) window.clearTimeout(noteHideTimer);
       noteHideTimer = window.setTimeout(function () {
         noteHideTimer = 0;
@@ -570,11 +665,26 @@
         window.clearTimeout(noteHideTimer);
         noteHideTimer = 0;
       }
-      scheduleNoteShow(0);
+      if (!readOnly) scheduleNoteShow(0);
     });
     notePane.addEventListener('mouseleave', function () {
       scheduleNoteHide(200);
     });
+
+    function onViewportResize() {
+      if (noteOpen()) placeNote();
+    }
+    window.addEventListener('resize', onViewportResize);
+    if (typeof window.ResizeObserver === 'function') {
+      try {
+        resizeObserver = new window.ResizeObserver(function () {
+          if (noteOpen()) placeNote();
+        });
+        resizeObserver.observe(card);
+      } catch (err) {
+        resizeObserver = null;
+      }
+    }
 
     function inShadowFocus(element) {
       try {
@@ -587,9 +697,10 @@
 
     /** True while the reader is typing a question or a note. */
     function isTyping() {
+      if (readOnly) return false;
       if (inShadowFocus(ask) || inShadowFocus(noteText)) return true;
-      if (String(ask.value || '').trim()) return true;
-      if (String(noteText.value || '').trim()) return true;
+      if (ask && String(ask.value || '').trim()) return true;
+      if (noteText && String(noteText.value || '').trim()) return true;
       return false;
     }
 
@@ -670,10 +781,22 @@
     });
 
     body.addEventListener('scroll', function () {
+      if (initializing) return;
+      // A programmatic jump to the top must not look like the reader scrolled
+      // up by hand, otherwise streaming would stop following.
+      if (Date.now() < suppressScrollStateUntil) return;
       autoScroll = body.scrollTop + body.clientHeight >= body.scrollHeight - 24;
     });
 
+    /** Pin the message area to the top; used for a freshly opened card. */
+    function scrollToTop() {
+      suppressScrollStateUntil = Date.now() + 150;
+      body.scrollTop = 0;
+    }
+
     function scrollToEnd() {
+      // The initial render must settle at the top, not at the last answer.
+      if (initializing) return;
       if (autoScroll) body.scrollTop = body.scrollHeight;
     }
 
@@ -756,9 +879,8 @@
     }
 
     function setBusy(busy) {
-      send.disabled = busy;
-      ask.disabled = busy;
-      card.querySelector('.pin').disabled = false;
+      if (send) send.disabled = busy;
+      if (ask) ask.disabled = busy;
       card.classList.toggle('busy', busy);
     }
 
@@ -770,6 +892,8 @@
     }
 
     function submit(question) {
+      // Read-only cards are viewers; they must never reach a request handler.
+      if (readOnly || !ask || !send) return;
       var text = String(question || '').trim();
       if (!text) return;
       if (!handlers.onAsk) return;
@@ -840,8 +964,9 @@
       ask.style.height = 'auto';
       ask.style.height = Math.min(ask.scrollHeight, 88) + 'px';
     });
-    card.querySelector('.close').addEventListener('click', function () {
+    closeButton.addEventListener('click', function () {
       if (handlers.onClose) handlers.onClose();
+      else if (readOnly) close();
     });
     var pinButton = card.querySelector('.pin');
     pinButton.addEventListener('click', function () {
@@ -889,26 +1014,23 @@
     }
 
     function setPosition(x, y) {
-      var width = host.offsetWidth || Math.min(392, window.innerWidth - 16);
+      var vw = viewportWidth();
+      var vh = viewportHeight();
+      var width = host.offsetWidth || Math.min(392, vw - 16);
       var height = host.offsetHeight || 320;
-      var maxX = Math.max(8, window.innerWidth - width - 8);
-      var maxY = Math.max(8, window.innerHeight - Math.min(height, window.innerHeight) - 8);
+      var maxX = Math.max(8, vw - width - 8);
+      var maxY = Math.max(8, vh - Math.min(height, vh) - 8);
       host.style.left = Math.round(Math.max(8, Math.min(x, maxX))) + 'px';
       host.style.top = Math.round(Math.max(8, Math.min(y, maxY))) + 'px';
+      if (noteOpen()) placeNote();
     }
 
-    function currentLeft() {
-      var value = parseFloat(host.style.left);
-      return isFinite(value) ? value : position.x;
-    }
-
-    function currentTop() {
-      var value = parseFloat(host.style.top);
-      return isFinite(value) ? value : position.y;
-    }
-
-    function reposition() {
-      setPosition(currentLeft(), currentTop());
+    function onViewportResizeCleanup() {
+      window.removeEventListener('resize', onViewportResize);
+      if (resizeObserver) {
+        try { resizeObserver.disconnect(); } catch (err) { /* ignore */ }
+        resizeObserver = null;
+      }
     }
 
     function clearTimers() {
@@ -950,6 +1072,7 @@
       closing = true;
       clearTimers();
       abortStream();
+      onViewportResizeCleanup();
       try { closeMenu(); } catch (err) { /* ignore */ }
       if (savedNode && savedNode.parentNode) savedNode.parentNode.removeChild(savedNode);
       savedNode = null;
@@ -993,6 +1116,7 @@
     var api = {
       host: host,
       card: card,
+      readOnly: readOnly,
       setPinned: setPinned,
       isPinned: isPinned,
       isTyping: isTyping,
@@ -1063,7 +1187,13 @@
       removeState: function (el) { if (el && el.parentNode) el.remove(); },
       setBusy: setBusy,
       submit: submit,
-      focus: function () { ask.focus(); },
+      focus: function () {
+        if (readOnly) {
+          if (copyButton && copyButton.focus) copyButton.focus();
+          return;
+        }
+        if (ask) ask.focus();
+      },
       abort: abortStream,
       close: close,
       destroy: destroy,
@@ -1073,9 +1203,27 @@
         var rect = host.getBoundingClientRect();
         host.style.left = Math.round(rect.left + dx) + 'px';
         host.style.top = Math.round(rect.top + dy) + 'px';
+        if (noteOpen()) placeNote();
       },
+      scrollToTop: scrollToTop,
       scrollToEnd: scrollToEnd
     };
+
+    if (readOnly && opts.explanation != null && String(opts.explanation).trim()) {
+      var explanation = String(opts.explanation);
+      var explanationMd = addAssistantBubble();
+      explanationMd.innerHTML = renderMarkdown(explanation);
+      explanationMd.dataset.raw = explanation;
+    }
+
+    // The first paint always starts at the top of the message area. Streaming
+    // updates still follow the bottom once autoScroll is active.
+    suppressScrollStateUntil = Date.now() + 150;
+    body.scrollTop = 0;
+    autoScroll = true;
+    initializing = false;
+    if (readOnly) showNote();
+
     return api;
   }
 

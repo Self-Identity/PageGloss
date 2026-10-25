@@ -272,8 +272,6 @@ h1 {
   list-style: none;
   margin: 8px 0 0;
   padding: 0;
-  max-height: 168px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -344,6 +342,49 @@ h1 {
   margin: 8px 0 0;
   font-size: 11.5px;
   color: var(--pg-fg-dim);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.pager[hidden] {
+  display: none;
+}
+
+.btn.pager-btn {
+  flex: 0 0 auto;
+  margin-top: 0;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pager-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--pg-fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notes-status {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--pg-fg-dim);
+  overflow-wrap: anywhere;
+}
+
+.notes-status[hidden] {
+  display: none;
 }
 
 .btn {

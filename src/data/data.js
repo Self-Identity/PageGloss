@@ -1,14 +1,22 @@
 /*
  * PageGloss - annotation data page.
  *
- * Read-only browser for everything in chrome.storage.local: annotations are
- * grouped by site, pages inside a group are paginated ten at a time, and the
- * marks of an expanded page are shown as a 5 x 10 matrix (fifty per page).
- * Hovering a mark opens a floating explanation / note panel; clicking it tries
- * to focus that annotation on the original page.
+ * Browse everything in chrome.storage.local: annotations are grouped by site,
+ * pages inside a group are paginated ten at a time, and the marks of an
+ * expanded page are shown as a 5 x 10 matrix (fifty per page).
  *
- * Classic script on purpose: messages.js, i18n.js and storage.js are loaded by
- * data.html before this file, so there is no import/export here.
+ * The page can also maintain the cache: sites, pages and single marks have
+ * checkboxes (selection may mix all three levels), the toolbar deletes or
+ * exports the selection, and every site/page row has its own delete and JSON
+ * export button. Exports use the same `pagegloss-backup` v1 envelope as the
+ * options page, so they can be imported back unchanged.
+ *
+ * Hovering a mark opens the real annotation card in read-only mode. The data
+ * page is loaded before card.js learns about read-only cards, so the call is
+ * capability-checked and falls back to the legacy built-in panel otherwise.
+ *
+ * Classic script on purpose: messages.js, i18n.js, storage.js and card.js are
+ * loaded by data.html before this file, so there is no import/export here.
  */
 (function () {
   'use strict';
@@ -22,11 +30,15 @@
   var GRID_ROWS = 10;
   var GRID_PAGE_SIZE = GRID_COLUMNS * GRID_ROWS; // 50 marks per page
   var HOVER_CLOSE_DELAY = 180;
+  var TOAST_DURATION = 3200;
+  var TOAST_ERROR_DURATION = 5200;
   var SVG_NS = 'http://www.w3.org/2000/svg';
 
   var ICON_PATHS = {
     chevron: ['M8 10l4 4 4-4'],
-    external: ['M14 4h6v6', 'M20 4l-9 9', 'M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5']
+    external: ['M14 4h6v6', 'M20 4l-9 9', 'M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'],
+    download: ['M12 4v10', 'M8 10l4 4 4-4', 'M5 19h14'],
+    trash: ['M4 7h16', 'M7 7l1 12h8l1-12', 'M10 7V5h4v2']
   };
 
   var state = {
@@ -36,9 +48,14 @@
     pageClosed: Object.create(null),
     pageIndex: Object.create(null),
     matrixIndex: Object.create(null),
+    selection: emptySelection(),
     loading: false,
     loadToken: 0,
-    overlay: null
+    working: false,
+    confirming: false,
+    overlay: null,
+    // 0 = not tried yet, 1 = card.js supports read-only cards, -1 = fallback.
+    cardMode: 0
   };
 
   var dom = {
@@ -51,7 +68,13 @@
     refresh: null,
     content: null,
     status: null,
-    sites: null
+    sites: null,
+    selectionCount: null,
+    selectAll: null,
+    clearSelection: null,
+    exportSelected: null,
+    deleteSelected: null,
+    toasts: null
   };
 
   /* ------------------------------------------------------------------ helpers */
@@ -92,6 +115,31 @@
       svg.appendChild(path);
     });
     return svg;
+  }
+
+  /** Small square icon button used for per-site / per-page actions. */
+  function iconButton(className, iconName, label, onClick) {
+    var node = button('btn-icon-sm' + (className ? ' ' + className : ''));
+    node.appendChild(icon(iconName, 'icon'));
+    node.title = label;
+    node.setAttribute('aria-label', label);
+    node.addEventListener('click', onClick);
+    return node;
+  }
+
+  /** Native checkbox in a label; the change handler re-renders the page. */
+  function checkbox(className, checked, label, onChange) {
+    var wrap = el('label', 'check' + (className ? ' ' + className : ''));
+    var input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'check-input';
+    input.checked = !!checked;
+    if (label) input.setAttribute('aria-label', label);
+    input.addEventListener('change', function () {
+      onChange(!!input.checked);
+    });
+    wrap.appendChild(input);
+    return wrap;
   }
 
   function siteKeyOf(page) {
@@ -193,6 +241,140 @@
     });
   }
 
+  /* --------------------------------------------------------------- selection */
+
+  function emptySelection() {
+    return {
+      sites: Object.create(null),
+      pages: Object.create(null),
+      anns: Object.create(null) // pageKey -> { annotationId: true }
+    };
+  }
+
+  function annotationIdsOf(page) {
+    var ids = Object.create(null);
+    var annotations = page && Array.isArray(page.annotations) ? page.annotations : [];
+    annotations.forEach(function (item) {
+      if (item && item.id) ids[item.id] = true;
+    });
+    return ids;
+  }
+
+  function isAnnotationSelected(pageKey, annotationId) {
+    var map = state.selection.anns[pageKey];
+    return !!(map && map[annotationId]);
+  }
+
+  function setSiteSelected(groupKey, selected) {
+    if (selected) state.selection.sites[groupKey] = true;
+    else delete state.selection.sites[groupKey];
+    render();
+  }
+
+  function setPageSelected(page, selected) {
+    var key = pageKeyOf(page);
+    if (selected) state.selection.pages[key] = true;
+    else delete state.selection.pages[key];
+    render();
+  }
+
+  function setAnnotationSelected(pageKey, annotationId, selected) {
+    var map = state.selection.anns[pageKey];
+    if (selected) {
+      if (!map) map = state.selection.anns[pageKey] = Object.create(null);
+      map[annotationId] = true;
+    } else if (map) {
+      delete map[annotationId];
+      if (!Object.keys(map).length) delete state.selection.anns[pageKey];
+    }
+    render();
+  }
+
+  function clearSelectionState() {
+    state.selection = emptySelection();
+    updateToolbar();
+  }
+
+  function selectAllSites() {
+    if (state.working) return;
+    state.selection = emptySelection();
+    state.groups.forEach(function (group) {
+      state.selection.sites[group.key] = true;
+    });
+    render();
+  }
+
+  /**
+   * Resolve the selection into the concrete work it implies: whole pages to
+   * clear plus individual marks to remove. Pages win over marks on the same
+   * page so nothing is processed twice.
+   */
+  function selectionTotals() {
+    var pageKeys = Object.create(null);
+    var pages = [];
+    var annsByPage = Object.create(null);
+    state.groups.forEach(function (group) {
+      var siteSelected = !!state.selection.sites[group.key];
+      group.pages.forEach(function (page) {
+        var key = pageKeyOf(page);
+        if (siteSelected || state.selection.pages[key]) {
+          if (!pageKeys[key]) {
+            pageKeys[key] = true;
+            pages.push(page);
+          }
+          return;
+        }
+        var picked = state.selection.anns[key];
+        if (!picked) return;
+        Object.keys(picked).forEach(function (id) {
+          if (!picked[id]) return;
+          if (!annsByPage[key]) annsByPage[key] = [];
+          annsByPage[key].push(id);
+        });
+      });
+    });
+    var annotations = 0;
+    Object.keys(annsByPage).forEach(function (key) {
+      annotations += annsByPage[key].length;
+    });
+    return {
+      pages: pages,
+      pageKeys: pageKeys,
+      annsByPage: annsByPage,
+      count: pages.length + annotations
+    };
+  }
+
+  /** Forget selections whose site/page/annotation disappeared after a reload. */
+  function pruneSelection() {
+    var siteKeys = Object.create(null);
+    var pageIds = Object.create(null);
+    state.groups.forEach(function (group) {
+      siteKeys[group.key] = true;
+    });
+    state.pages.forEach(function (page) {
+      pageIds[pageKeyOf(page)] = annotationIdsOf(page);
+    });
+
+    Object.keys(state.selection.sites).forEach(function (key) {
+      if (!siteKeys[key]) delete state.selection.sites[key];
+    });
+    Object.keys(state.selection.pages).forEach(function (key) {
+      if (!pageIds[key]) delete state.selection.pages[key];
+    });
+    Object.keys(state.selection.anns).forEach(function (pageKey) {
+      if (!pageIds[pageKey]) {
+        delete state.selection.anns[pageKey];
+        return;
+      }
+      var live = pageIds[pageKey];
+      Object.keys(state.selection.anns[pageKey]).forEach(function (id) {
+        if (!live[id]) delete state.selection.anns[pageKey][id];
+      });
+      if (!Object.keys(state.selection.anns[pageKey]).length) delete state.selection.anns[pageKey];
+    });
+  }
+
   /* ------------------------------------------------------------------ loading */
 
   function load() {
@@ -200,23 +382,27 @@
     state.loading = true;
     closeOverlay();
     setRefreshBusy(true);
-    Store.getAllPages().then(function (pages) {
+    return Store.getAllPages().then(function (pages) {
       if (token !== state.loadToken) return;
       state.pages = Array.isArray(pages) ? pages : [];
       state.groups = groupPages(state.pages);
       pruneState();
+      pruneSelection();
       render();
     }).catch(function (err) {
       if (token !== state.loadToken) return;
       state.pages = [];
       state.groups = [];
+      pruneSelection();
       dom.sites.textContent = '';
       renderStats();
+      updateToolbar();
       showStatus(t('dataLoadFail', { s: (err && err.message) || t('errUnknown') }), true);
     }).then(function () {
       if (token !== state.loadToken) return;
       state.loading = false;
       setRefreshBusy(false);
+      updateToolbar();
     });
   }
 
@@ -234,6 +420,10 @@
     dom.title.textContent = t('dataPageTitle');
     dom.expandAllText.textContent = t('dataExpandAll');
     dom.collapseAllText.textContent = t('dataCollapseAll');
+    dom.selectAll.textContent = t('dataSelectAll');
+    dom.clearSelection.textContent = t('dataClearSelection');
+    dom.exportSelected.textContent = t('dataExportSelected');
+    dom.deleteSelected.textContent = t('dataDeleteSelected');
     // The allowed key set has no dedicated "refresh" label, so the icon-only
     // button reuses the page title as its accessible name.
     dom.refresh.setAttribute('aria-label', t('dataPageTitle'));
@@ -262,6 +452,63 @@
     dom.status.classList.remove('is-error');
   }
 
+  /* ---------------------------------------------------------------- toolbar */
+
+  function updateToolbar() {
+    var totals = selectionTotals();
+    var count = totals.count;
+    dom.selectionCount.textContent = t('dataSelectionCount', { n: count });
+    dom.exportSelected.hidden = count === 0;
+    dom.clearSelection.disabled = count === 0 || state.working;
+    dom.deleteSelected.disabled = count === 0 || state.working;
+    dom.selectAll.disabled = state.loading || state.working || !state.groups.length;
+  }
+
+  /* ------------------------------------------------------------------ toast */
+
+  /**
+   * Non-blocking notice. The node is removed after the fade-out transition
+   * (with a timer as a fallback), never just hidden.
+   */
+  function toast(text, isError) {
+    if (!dom.toasts) return;
+    var node = el('div', 'toast' + (isError ? ' is-error' : ''));
+    node.setAttribute('role', 'status');
+    node.textContent = String(text == null ? '' : text);
+    dom.toasts.appendChild(node);
+
+    var timer = 0;
+    var removed = false;
+
+    function remove() {
+      if (removed) return;
+      removed = true;
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = 0;
+      }
+      node.removeEventListener('transitionend', onEnd);
+      if (node.parentNode) node.parentNode.removeChild(node);
+    }
+
+    function onEnd(event) {
+      if (!event || event.target === node) remove();
+    }
+
+    node.addEventListener('transitionend', onEnd);
+    node.addEventListener('click', remove);
+    window.setTimeout(function () {
+      if (removed) return;
+      node.classList.add('is-leaving');
+      window.setTimeout(remove, 400);
+    }, isError ? TOAST_ERROR_DURATION : TOAST_DURATION);
+    timer = window.setTimeout(remove, (isError ? TOAST_ERROR_DURATION : TOAST_DURATION) + 1200);
+
+    while (dom.toasts.childNodes.length > 4) {
+      dom.toasts.removeChild(dom.toasts.firstChild);
+    }
+  }
+
   /* ------------------------------------------------------------------ render */
 
   function render() {
@@ -269,6 +516,7 @@
     var scrollTop = dom.content.scrollTop;
     dom.sites.textContent = '';
     renderStats();
+    updateToolbar();
     if (!state.groups.length) {
       showStatus(t('dataEmpty'), false);
       dom.content.scrollTop = 0;
@@ -285,21 +533,46 @@
   function renderGroup(group) {
     var open = !state.siteClosed[group.key];
     var section = el('section', 'site');
+    var head = el('div', 'site-head');
 
-    var head = button('site-head');
-    head.setAttribute('aria-expanded', open ? 'true' : 'false');
-    head.appendChild(icon('chevron', 'chev'));
+    head.appendChild(checkbox(
+      'site-check',
+      !!state.selection.sites[group.key],
+      siteLabel(group.key),
+      function (checked) { setSiteSelected(group.key, checked); }
+    ));
+
+    var toggle = button('site-toggle');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggle.appendChild(icon('chevron', 'chev'));
     var name = el('span', 'site-name', siteLabel(group.key));
     name.title = group.key;
-    head.appendChild(name);
+    toggle.appendChild(name);
+    toggle.addEventListener('click', function () {
+      state.siteClosed[group.key] = open;
+      render();
+    });
+    head.appendChild(toggle);
+
     var meta = el('span', 'site-meta');
     meta.textContent = t('dataPagesCount', { n: group.pages.length }) +
       ' · ' + t('dataAnnotationsCount', { n: group.annotations });
     head.appendChild(meta);
-    head.addEventListener('click', function () {
-      state.siteClosed[group.key] = open;
-      render();
-    });
+
+    var actions = el('div', 'site-actions');
+    actions.appendChild(iconButton(
+      '',
+      'download',
+      t('dataExportSelected') + ' · ' + siteLabel(group.key),
+      function () { exportSite(group); }
+    ));
+    actions.appendChild(iconButton(
+      'is-danger',
+      'trash',
+      t('dataDelete') + ' · ' + siteLabel(group.key),
+      function () { deleteSite(group); }
+    ));
+    head.appendChild(actions);
     section.appendChild(head);
 
     if (!open) return section;
@@ -327,9 +600,17 @@
 
   function renderPage(page) {
     var key = pageKeyOf(page);
+    var label = page.title || page.url || key;
     var open = !state.pageClosed[key];
     var article = el('article', 'page');
     var row = el('div', 'page-row');
+
+    row.appendChild(checkbox(
+      'page-check',
+      !!state.selection.pages[key],
+      label,
+      function (checked) { setPageSelected(page, checked); }
+    ));
 
     var toggle = button('page-toggle');
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -355,6 +636,22 @@
 
     row.appendChild(toggle);
     row.appendChild(openLink);
+
+    var actions = el('div', 'page-actions');
+    actions.appendChild(iconButton(
+      '',
+      'download',
+      t('dataExportSelected') + ' · ' + label,
+      function () { exportPage(page); }
+    ));
+    actions.appendChild(iconButton(
+      'is-danger',
+      'trash',
+      t('dataDelete') + ' · ' + label,
+      function () { deletePage(page); }
+    ));
+    row.appendChild(actions);
+
     article.appendChild(row);
 
     if (open) {
@@ -395,23 +692,47 @@
   }
 
   function renderCell(page, annotation) {
-    var cell = button('mark-cell');
+    var pageKey = pageKeyOf(page);
     var text = String((annotation && annotation.text) || '');
-    cell.appendChild(el('span', 'mark-text', text));
-    cell.appendChild(el('span', 'mark-time', updatedLine(annotation.updatedAt || annotation.createdAt)));
-    if (text) cell.setAttribute('aria-label', text + ' — ' + t('dataOpenHint'));
-    cell.addEventListener('mouseenter', function () {
+    var cell = el('div', 'mark-cell');
+    if (annotation && annotation.stale === true) cell.classList.add('is-stale');
+
+    cell.appendChild(checkbox(
+      'mark-check',
+      isAnnotationSelected(pageKey, annotation && annotation.id),
+      text || t('dataAnnotationsTitle'),
+      function (checked) {
+        if (annotation && annotation.id) setAnnotationSelected(pageKey, annotation.id, checked);
+      }
+    ));
+
+    var hit = button('mark-hit');
+    hit.appendChild(el('span', 'mark-text', text));
+
+    var foot = el('span', 'mark-foot');
+    if (annotation && annotation.stale === true) {
+      var badge = el('span', 'stale-badge', t('dataStale'));
+      badge.title = t('dataStaleHint');
+      foot.appendChild(badge);
+    }
+    foot.appendChild(el('span', 'mark-time', updatedLine(annotation.updatedAt || annotation.createdAt)));
+    hit.appendChild(foot);
+    if (text) hit.setAttribute('aria-label', text + ' — ' + t('dataOpenHint'));
+
+    hit.addEventListener('mouseenter', function () {
       showOverlay(page, annotation, cell);
     });
-    cell.addEventListener('mouseleave', scheduleOverlayClose);
-    cell.addEventListener('focus', function () {
+    hit.addEventListener('mouseleave', scheduleOverlayClose);
+    hit.addEventListener('focus', function () {
       showOverlay(page, annotation, cell);
     });
-    cell.addEventListener('blur', scheduleOverlayClose);
-    cell.addEventListener('click', function () {
+    hit.addEventListener('blur', scheduleOverlayClose);
+    hit.addEventListener('click', function () {
       closeOverlay();
       openFocus(page, annotation);
     });
+
+    cell.appendChild(hit);
     return cell;
   }
 
@@ -434,7 +755,7 @@
     return bar;
   }
 
-  /* ------------------------------------------------------------------ actions */
+  /* ---------------------------------------------------------------- navigation */
 
   function expandAll() {
     state.siteClosed = Object.create(null);
@@ -468,6 +789,245 @@
     var base = page && page.url ? String(page.url) : '';
     if (!base || !annotation || !annotation.id) return;
     openUrl(base + '#pg-focus=' + encodeURIComponent(String(annotation.id)));
+  }
+
+  /* ----------------------------------------------------------------- deletion */
+
+  function messageOf(err) {
+    if (!err) return t('errUnknown');
+    var text = err && err.message ? String(err.message) : String(err);
+    return text.length > 300 ? text.slice(0, 300) : text;
+  }
+
+  function confirmDelete(count) {
+    var title = t('dataDeleteConfirm', { n: count });
+    closeOverlay();
+    var api = window.PageGlossCard;
+    if (api && typeof api.confirm === 'function') {
+      try {
+        return api.confirm({
+          title: title,
+          body: '',
+          cancel: t('confirmCancel'),
+          ok: t('dataDelete')
+        }).catch(function () { return false; });
+      } catch (err) { /* fall through to window.confirm */ }
+    }
+    try {
+      return Promise.resolve(window.confirm(title));
+    } catch (err) {
+      return Promise.resolve(false);
+    }
+  }
+
+  /**
+   * Run a delete plan sequentially. Sequential writes matter because the
+   * storage index is read-modify-write; parallel clearPage calls would race.
+   */
+  function runDelete(spec) {
+    if (state.working) return Promise.resolve(false);
+    state.working = true;
+    closeOverlay();
+    setRefreshBusy(true);
+    updateToolbar();
+
+    var done = 0;
+    var chain = Promise.resolve();
+
+    spec.pageKeys.forEach(function (key) {
+      chain = chain.then(function () {
+        return Store.clearPage(key).then(function () {
+          done++;
+        });
+      });
+    });
+
+    Object.keys(spec.annsByPage).forEach(function (key) {
+      var ids = spec.annsByPage[key];
+      chain = chain.then(function () {
+        return Store.getPage(key).then(function (page) {
+          ids.forEach(function (id) {
+            Store.removeAnnotationFromPage(page, id);
+          });
+          if (!page.annotations.length) {
+            return Store.clearPage(key).then(function () {
+              done += ids.length;
+            });
+          }
+          return Store.savePage(page).then(function () {
+            done += ids.length;
+          });
+        });
+      });
+    });
+
+    function finish() {
+      state.working = false;
+      clearSelectionState();
+      return load();
+    }
+
+    return chain.then(function () {
+      return finish().then(function () {
+        toast(t('dataDeleted', { n: done }));
+      });
+    }, function (err) {
+      return finish().then(function () {
+        toast(t('dataDeleteFail', { s: messageOf(err) }), true);
+      });
+    });
+  }
+
+  /** One confirmation at a time, whatever entry point asked for it. */
+  function askDelete(count, onConfirm) {
+    if (state.working || state.confirming) return;
+    state.confirming = true;
+    confirmDelete(count).then(function (ok) {
+      state.confirming = false;
+      if (ok) onConfirm();
+    });
+  }
+
+  function deleteSelection() {
+    var totals = selectionTotals();
+    if (!totals.count) return;
+    askDelete(totals.count, function () {
+      runDelete({
+        pageKeys: totals.pages.map(pageKeyOf),
+        annsByPage: totals.annsByPage
+      });
+    });
+  }
+
+  function deleteSite(group) {
+    if (!group || !group.pages.length) return;
+    var pageKeys = group.pages.map(pageKeyOf);
+    askDelete(pageKeys.length, function () {
+      runDelete({ pageKeys: pageKeys, annsByPage: {} });
+    });
+  }
+
+  function deletePage(page) {
+    if (!page) return;
+    var key = pageKeyOf(page);
+    askDelete(1, function () {
+      runDelete({ pageKeys: [key], annsByPage: {} });
+    });
+  }
+
+  /* ------------------------------------------------------------------- export */
+
+  function pad2(value) {
+    return value < 10 ? '0' + value : String(value);
+  }
+
+  function dateStamp() {
+    var now = new Date();
+    return now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate());
+  }
+
+  function slugify(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+      .replace(/[^a-z0-9.-]+/g, '-')
+      .replace(/^[-.]+|[-.]+$/g, '')
+      .slice(0, 60);
+  }
+
+  function filenameFor(type, nameSource) {
+    var stamp = dateStamp();
+    if (type === 'selection') return 'pagegloss-selection-' + stamp + '.json';
+    var slug = slugify(nameSource) || 'page';
+    return 'pagegloss-' + type + '-' + slug + '-' + stamp + '.json';
+  }
+
+  function downloadFile(text, filename) {
+    var blob = new Blob([text], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 4000);
+  }
+
+  /**
+   * Build a pagegloss-backup v1 payload from fresh Store.getPage results and
+   * download it. The options page imports exactly this shape, so scope and
+   * exportedAt are informational only.
+   */
+  function exportPayload(keys, type, label, nameSource) {
+    var unique = [];
+    var seen = Object.create(null);
+    keys.forEach(function (key) {
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      unique.push(key);
+    });
+    if (!unique.length) {
+      toast(t('dataExportFail', { s: t('dataEmpty') }), true);
+      return Promise.resolve(false);
+    }
+
+    closeOverlay();
+    return Promise.all(unique.map(function (key) {
+      return Store.getPage(key).then(function (page) {
+        return page;
+      }).catch(function () {
+        return null;
+      });
+    })).then(function (pages) {
+      var map = {};
+      pages.forEach(function (page) {
+        if (page && page.urlKey) map[page.urlKey] = page;
+      });
+      var count = Object.keys(map).length;
+      if (!count) throw new Error(t('dataEmpty'));
+      var payload = {
+        format: 'pagegloss-backup',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        scope: { type: type, label: label },
+        pages: map
+      };
+      downloadFile(JSON.stringify(payload, null, 2), filenameFor(type, nameSource));
+      toast(t('dataExportOk', { n: count }));
+      return true;
+    }).catch(function (err) {
+      toast(t('dataExportFail', { s: messageOf(err) }), true);
+      return false;
+    });
+  }
+
+  function exportSite(group) {
+    exportPayload(
+      group.pages.map(pageKeyOf),
+      'site',
+      siteLabel(group.key),
+      siteLabel(group.key)
+    );
+  }
+
+  function exportPage(page) {
+    var key = pageKeyOf(page);
+    var label = page.title || page.url || key;
+    exportPayload([key], 'page', label, siteLabel(siteKeyOf(page)));
+  }
+
+  function exportSelection() {
+    var totals = selectionTotals();
+    if (!totals.count) return;
+    var keys = totals.pages.map(pageKeyOf);
+    Object.keys(totals.annsByPage).forEach(function (key) {
+      keys.push(key);
+    });
+    exportPayload(keys, 'selection', t('dataExportSelected'), '');
   }
 
   /* ---------------------------------------------------------- hover overlay */
@@ -505,20 +1065,26 @@
 
     var foot = el('div', 'overlay-foot');
     foot.appendChild(el('span', 'overlay-hint', t('dataOpenHint')));
+    if (annotation && annotation.stale === true) {
+      var badge = el('span', 'stale-badge', t('dataStale'));
+      badge.title = t('dataStaleHint');
+      foot.appendChild(badge);
+    }
     foot.appendChild(el('span', 'overlay-time', updatedLine(annotation.updatedAt || annotation.createdAt)));
     node.appendChild(foot);
     return node;
   }
 
-  /** Keep the card inside the viewport; flip above the cell when there is no room. */
-  function placeOverlay(node, cell) {
+  /** Compute the fixed position for a panel/card anchored to a cell. */
+  function floatingPosition(node, cell) {
+    if (!node || !cell || !cell.getBoundingClientRect) return null;
     var margin = 8;
     var gap = 8;
     var viewportWidth = document.documentElement.clientWidth || window.innerWidth;
     var viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     var rect = cell.getBoundingClientRect();
-    var width = node.offsetWidth;
-    var height = node.offsetHeight;
+    var width = node.offsetWidth || 360;
+    var height = node.offsetHeight || 240;
 
     var left = rect.left;
     var top = rect.bottom + gap;
@@ -530,41 +1096,158 @@
     }
     if (top < margin) top = margin;
 
-    node.style.left = Math.round(left) + 'px';
-    node.style.top = Math.round(top) + 'px';
+    return { left: Math.round(left), top: Math.round(top) };
+  }
+
+  /** Keep the floating panel/card inside the viewport, flipping above if needed. */
+  function placeFloating(node, cell) {
+    var position = floatingPosition(node, cell);
+    if (!position) return;
+    node.style.left = position.left + 'px';
+    node.style.top = position.top + 'px';
+  }
+
+  function destroyCard(card) {
+    if (!card) return;
+    try {
+      if (typeof card.destroy === 'function') card.destroy();
+      else if (typeof card.close === 'function') card.close(false);
+      else if (card.host && card.host.parentNode) card.host.parentNode.removeChild(card.host);
+    } catch (err) { /* the node is detached on a best-effort basis */ }
+  }
+
+  /** Wire the card's own close button to this page's overlay lifecycle. */
+  function wireCardClose(card) {
+    try {
+      var root = card && card.host ? card.host.shadowRoot : null;
+      if (!root) return;
+      var closeButton = root.querySelector('.close');
+      if (closeButton) closeButton.addEventListener('click', closeOverlay);
+    } catch (err) { /* older/alternative card builds may not expose .close */ }
+  }
+
+  /**
+   * Ask card.js for a read-only card. Older builds ignore `readOnly` and return
+   * the interactive API without the read-only surface, so it is validated and
+   * destroyed immediately; the caller then uses the legacy panel.
+   */
+  function tryCreateReadOnlyCard(page, annotation, cell) {
+    if (state.cardMode < 0) return null;
+    var api = window.PageGlossCard;
+    if (!api || typeof api.create !== 'function') {
+      state.cardMode = -1;
+      return null;
+    }
+    var rect = cell.getBoundingClientRect();
+    var card = null;
+    try {
+      card = api.create({
+        readOnly: true,
+        i18n: I,
+        term: String((annotation && annotation.text) || ''),
+        color: annotation && annotation.color ? String(annotation.color) : '',
+        explanation: explanationText(page, annotation),
+        note: annotation && typeof annotation.note === 'string' ? annotation.note : '',
+        position: { x: Math.round(rect.left), y: Math.round(rect.bottom + 8) }
+      });
+    } catch (err) {
+      card = null;
+    }
+    var supported = !!(card && card.host);
+    if (supported) {
+      try {
+        supported = card.readOnly === true ||
+          typeof card.scrollToTop === 'function' ||
+          (card.host.getAttribute && card.host.getAttribute('data-readonly') === 'true') ||
+          !!(card.host.shadowRoot && card.host.shadowRoot.querySelector('.card[aria-readonly="true"]'));
+      } catch (err) {
+        supported = false;
+      }
+    }
+    if (!supported) {
+      destroyCard(card);
+      state.cardMode = -1;
+      return null;
+    }
+    state.cardMode = 1;
+    // card.js returns a detached host; the caller owns mounting it.
+    if (!card.host.isConnected) {
+      (document.body || document.documentElement).appendChild(card.host);
+    }
+    return card;
+  }
+
+  function cancelOverlayTimer(record) {
+    if (!record || !record.timer) return;
+    window.clearTimeout(record.timer);
+    record.timer = 0;
+  }
+
+  /** Keep the card open while the pointer is over the card or its note pane. */
+  function bindCardHover(card, record) {
+    function keepOpen() {
+      cancelOverlayTimer(record);
+    }
+    var targets = [card.host];
+    try {
+      var root = card.host.shadowRoot;
+      if (root) {
+        var content = root.querySelector('.card');
+        var note = root.querySelector('.note');
+        if (content) targets.push(content);
+        if (note) targets.push(note);
+      }
+    } catch (err) { /* fall back to the host alone */ }
+    targets.forEach(function (target) {
+      target.addEventListener('mouseenter', keepOpen);
+      target.addEventListener('mouseleave', scheduleOverlayClose);
+    });
   }
 
   function showOverlay(page, annotation, cell) {
+    if (!cell) return;
     var current = state.overlay;
     if (current && current.cell === cell) {
-      if (current.timer) {
-        window.clearTimeout(current.timer);
-        current.timer = 0;
-      }
+      cancelOverlayTimer(current);
       return;
     }
     closeOverlay();
 
-    var node = buildOverlay(page, annotation);
-    var record = { node: node, cell: cell, timer: 0 };
+    var record = { cell: cell, timer: 0, card: null, node: null };
     state.overlay = record;
 
-    node.addEventListener('mouseenter', function () {
-      if (record.timer) {
-        window.clearTimeout(record.timer);
-        record.timer = 0;
+    var card = tryCreateReadOnlyCard(page, annotation, cell);
+    if (card) {
+      record.card = card;
+      bindCardHover(card, record);
+      wireCardClose(card);
+      var cardPosition = floatingPosition(card.host, cell);
+      if (cardPosition) {
+        // setPosition also re-runs the card's own note-pane placement, which
+        // matters after the panel flips above the cell.
+        if (typeof card.setPosition === 'function') card.setPosition(cardPosition.left, cardPosition.top);
+        else {
+          card.host.style.left = cardPosition.left + 'px';
+          card.host.style.top = cardPosition.top + 'px';
+        }
       }
+      return;
+    }
+
+    var node = buildOverlay(page, annotation);
+    record.node = node;
+    node.addEventListener('mouseenter', function () {
+      cancelOverlayTimer(record);
     });
     node.addEventListener('mouseleave', scheduleOverlayClose);
-
     document.body.appendChild(node);
-    placeOverlay(node, cell);
+    placeFloating(node, cell);
   }
 
   function scheduleOverlayClose() {
     var record = state.overlay;
     if (!record) return;
-    if (record.timer) window.clearTimeout(record.timer);
+    cancelOverlayTimer(record);
     record.timer = window.setTimeout(function () {
       record.timer = 0;
       if (state.overlay === record) closeOverlay();
@@ -576,10 +1259,8 @@
     var record = state.overlay;
     if (!record) return;
     state.overlay = null;
-    if (record.timer) {
-      window.clearTimeout(record.timer);
-      record.timer = 0;
-    }
+    cancelOverlayTimer(record);
+    if (record.card) destroyCard(record.card);
     if (record.node && record.node.isConnected) record.node.remove();
   }
 
@@ -589,8 +1270,16 @@
     dom.expandAll.addEventListener('click', expandAll);
     dom.collapseAll.addEventListener('click', collapseAll);
     dom.refresh.addEventListener('click', function () {
-      if (!state.loading) load();
+      if (!state.loading && !state.working) load();
     });
+    dom.selectAll.addEventListener('click', selectAllSites);
+    dom.clearSelection.addEventListener('click', function () {
+      closeOverlay();
+      clearSelectionState();
+      render();
+    });
+    dom.exportSelected.addEventListener('click', exportSelection);
+    dom.deleteSelected.addEventListener('click', deleteSelection);
     dom.content.addEventListener('scroll', closeOverlay, { passive: true });
     window.addEventListener('resize', closeOverlay);
     document.addEventListener('keydown', function (event) {
@@ -609,7 +1298,14 @@
     dom.content = document.getElementById('content');
     dom.status = document.getElementById('status');
     dom.sites = document.getElementById('sites');
+    dom.selectionCount = document.getElementById('selectionCount');
+    dom.selectAll = document.getElementById('selectAll');
+    dom.clearSelection = document.getElementById('clearSelection');
+    dom.exportSelected = document.getElementById('exportSelected');
+    dom.deleteSelected = document.getElementById('deleteSelected');
+    dom.toasts = document.getElementById('toasts');
     applyLabels();
+    updateToolbar();
     wire();
     load();
   }

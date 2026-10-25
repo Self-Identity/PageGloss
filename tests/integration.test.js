@@ -899,6 +899,59 @@ async function main() {
     assert(all[0].annotations[0].noteUpdatedAt > 0, 'noteUpdatedAt is persisted');
   });
 
+  await test('a stale flag survives the storage round trip', async () => {
+    const env = bootContent('words');
+    const Store = env.sandbox.PageGlossStore;
+    const page = Store.sanitizePage({
+      url: 'https://example.com/a',
+      title: 'A',
+      annotations: [{
+        id: 'a1',
+        text: 'alpha',
+        color: '#fff2a8',
+        anchors: [],
+        stale: true,
+        staleAt: 1700000000000,
+        lastCheckedAt: 1700000000000
+      }]
+    }, 'https://example.com/a');
+    await Store.savePage(page);
+    const all = await Store.getAllPages();
+    const saved = all[0].annotations[0];
+    assertEqual(saved.stale, true, 'stale flag is preserved');
+    assertEqual(saved.staleAt, 1700000000000, 'staleAt is preserved');
+    assertEqual(saved.lastCheckedAt, 1700000000000, 'lastCheckedAt is preserved');
+  });
+
+  await test('an exported backup can be imported again', async () => {
+    const env = bootContent('words');
+    const Store = env.sandbox.PageGlossStore;
+    const page = Store.sanitizePage({
+      url: 'https://example.com/a',
+      title: 'A',
+      annotations: [{ id: 'a1', text: 'alpha', color: '#fff2a8', anchors: [], note: 'kept' }]
+    }, 'https://example.com/a');
+    await Store.savePage(page);
+
+    // Exactly the shape the data page downloads: the options importer must eat it.
+    const backup = {
+      format: 'pagegloss-backup',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      scope: { type: 'page', label: 'example.com' },
+      pages: {}
+    };
+    const pages = await Store.getAllPages();
+    pages.forEach((item) => { backup.pages[item.urlKey] = item; });
+
+    await Store.clearAll();
+    assertEqual((await Store.getAllPages()).length, 0, 'cleared before import');
+    const count = await Store.importAll(backup, { includeSettings: false });
+    assertEqual(count, 1, 'one page imported');
+    const restored = await Store.getPage('https://example.com/a');
+    assertEqual(restored.annotations[0].note, 'kept', 'note survives export and import');
+  });
+
   const failed = results.filter((item) => !item.ok);
   results.forEach((item) => {
     console.log('[' + (item.ok ? 'PASS' : 'FAIL') + '] ' + item.name);

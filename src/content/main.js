@@ -883,6 +883,8 @@
         state.note.card.setPinned(true);
         state.note.card.setPosition(position.x, position.y);
       }
+      // Only a card opened by "mark and explain" becomes temporarily resident.
+      if (opts.sticky) state.note.sticky = true;
       state.note.card.focus();
       return state.note.card;
     }
@@ -910,12 +912,21 @@
       state.threads[annotation.id] = thread;
     }
 
+    // The reader should start at the top of a restored thread. Streaming keeps
+    // the card's own auto-follow behaviour; we do not override it per token.
+    if (typeof card.scrollToTop === 'function') {
+      try {
+        card.scrollToTop();
+      } catch (err) { /* older card builds */ }
+    }
+
     state.note = {
       annotationId: annotation.id,
       card: card,
       mark: mark || null,
       saveTimer: 0,
-      requestSeq: 0
+      requestSeq: 0,
+      sticky: !!opts.sticky
     };
 
     if (!thread.length) {
@@ -986,6 +997,7 @@
   function closeNote(userAction) {
     if (!state.note) return;
     var note = state.note;
+    note.sticky = false;
     state.note = null;
     window.clearTimeout(note.saveTimer);
     try { note.card.abort(); } catch (err) { /* already gone */ }
@@ -1080,6 +1092,16 @@
     }
   }
 
+  /** True while the reader is typing a follow-up question or a note. */
+  function cardIsTyping(card) {
+    return !!(card && typeof card.isTyping === 'function' && card.isTyping());
+  }
+
+  /** A freshly marked card stays open until the reader dismisses it explicitly. */
+  function noteIsSticky() {
+    return !!(state.note && state.note.sticky === true);
+  }
+
   function scheduleHide(delay) {
     window.clearTimeout(state.hideTimer);
     state.hideTimer = window.setTimeout(function () {
@@ -1087,7 +1109,9 @@
       var card = state.note.card;
       if (card.isPinned()) return;
       // Never yank the card away while the reader is typing a question or note.
-      if (typeof card.isTyping === 'function' && card.isTyping()) return;
+      if (cardIsTyping(card)) return;
+      // A card opened right after marking is temporarily resident.
+      if (noteIsSticky()) return;
       if (isPointerInsideCard() || isPointerOnMark()) return;
       closeNote(true);
     }, delay == null ? 260 : delay);
@@ -1416,7 +1440,8 @@
       saveAnnotationsDebounced();
       // Still open the card so the notice, the settings shortcut and the retry
       // button are one click away. It is NOT pinned: only the pin button pins.
-      var pending = openNote(annotation, { pin: false, auto: false });
+      // It stays resident until dismissed because the reader just marked text.
+      var pending = openNote(annotation, { pin: false, auto: false, sticky: true });
       notifyNotConfigured(config, pending);
       return pending;
     }
@@ -1428,7 +1453,8 @@
       showToast(t('toastMarked', { n: result.created }));
     }
     // Marking never pins the card; the pin button is the only way to pin.
-    var card = openNote(annotation, { pin: false, auto: true });
+    // It is temporarily resident (sticky) so scrolling cannot dismiss it.
+    var card = openNote(annotation, { pin: false, auto: true, sticky: true });
     saveAnnotationsDebounced();
     return card;
   }
@@ -1579,6 +1605,14 @@
       state.threads[id] = state.page.chats[id].slice();
     });
 
+    // Remember which annotations were anchored or marked before the re-anchor
+    // pass below may clear the runtime anchors of text that no longer exists.
+    previouslyMarked = {};
+    state.annotations.forEach(function (annotation) {
+      var anchors = Array.isArray(annotation.anchors) ? annotation.anchors : [];
+      if (anchors.length || Number(annotation.marks) > 0) previouslyMarked[annotation.id] = true;
+    });
+
     state.annotations.forEach(function (annotation) {
       var ranges = M.rangesFromAnchors(annotation).slice(0, S.MAX_MARKS_PER_ANNOTATION);
       if (!ranges.length) {
@@ -1599,6 +1633,137 @@
       annotation.marks = M.applyRanges(map, offsets);
     });
     saveAnnotationsDebounced();
+  }
+
+  /* --------------------------------------------------------- stale annotations */
+
+  var STALE_RECHECK_MS = 5 * 60 * 1000;
+  var staleMonitor = { ran: false, scheduled: false, lastRunAt: 0 };
+  // Annotation ids that were anchored or marked before restorePage() rewrote
+  // the runtime anchor list (a page may have changed since the last visit).
+  var previouslyMarked = {};
+
+  function applyStaleResult(target, exists, at) {
+    if (!target) return;
+    target.lastCheckedAt = at;
+    if (exists) {
+      delete target.stale;
+      delete target.staleAt;
+    } else {
+      target.stale = true;
+      target.staleAt = at;
+    }
+  }
+
+  /**
+   * Advisory only: check whether the marked text still occurs on the page.
+   * Runs in the background, updates memory plus the debounced save, and never
+   * touches the DOM, the toast surface or an open card.
+   */
+  function detectStaleAnnotations() {
+    try {
+      if (!state.page || !Array.isArray(state.page.annotations) || !state.page.annotations.length) return;
+      if (!M || typeof M.buildTextMap !== 'function' || typeof M.normalizeNeedle !== 'function') return;
+      var now = Date.now();
+      var pending = [];
+      for (var i = 0; i < state.page.annotations.length; i++) {
+        var stored = state.page.annotations[i];
+        if (!stored || typeof stored.text !== 'string' || !stored.text) continue;
+        var anchors = Array.isArray(stored.anchors) ? stored.anchors : [];
+        // Only annotations that were anchored or marked before are worth checking.
+        if (!anchors.length && !(Number(stored.marks) > 0) && !previouslyMarked[stored.id]) continue;
+        var checkedAt = Number(stored.lastCheckedAt) || 0;
+        if (checkedAt && now - checkedAt < STALE_RECHECK_MS) continue;
+        pending.push(stored);
+      }
+      if (!pending.length) return;
+
+      // One page text map serves every annotation in this pass.
+      var map = M.buildTextMap(document.body);
+      // buildTextMap deliberately skips our own <pagegloss-mark> wrappers, so a
+      // currently highlighted term is absent from map.raw. Add the mark text
+      // back; a live mark for the annotation is proof enough on its own.
+      var searchMap = map;
+      try {
+        var markText = '';
+        var marks = document.querySelectorAll('pagegloss-mark');
+        for (var k = 0; k < marks.length; k++) markText += ' ' + (marks[k].textContent || '');
+        markText = M.normalizeNeedle(markText);
+        if (markText) searchMap = { raw: M.normalizeNeedle(map.raw + ' ' + markText) };
+      } catch (err) { /* keep the plain map */ }
+      var checkedAtStamp = Date.now();
+      for (var j = 0; j < pending.length; j++) {
+        var annotation = pending[j];
+        var needle = M.normalizeNeedle(annotation.text);
+        var exists = false;
+        try {
+          exists = M.countMarks(annotation.id) > 0;
+        } catch (err) {
+          exists = false;
+        }
+        if (!exists && needle) {
+          // Same matching rules as marking (settings.matchMode, whole-word first).
+          try {
+            exists = matchNeedle(searchMap, needle, 1).matches.length > 0;
+          } catch (err) {
+            exists = false;
+          }
+        }
+        applyStaleResult(annotation, exists, checkedAtStamp);
+        applyStaleResult(annotationById(annotation.id), exists, checkedAtStamp);
+      }
+      saveAnnotationsDebounced();
+    } catch (err) {
+      // Staleness is advisory; it must never disturb reading.
+    }
+  }
+
+  /**
+   * Defer the check so restoring highlights and the first paint stay fast.
+   * "force" is used after a BFCache restore and keeps a five minute throttle.
+   */
+  function scheduleStaleDetection(options) {
+    var opts = options || {};
+    var force = !!opts.force;
+    if (staleMonitor.scheduled) return;
+    if (force) {
+      if (Date.now() - staleMonitor.lastRunAt < STALE_RECHECK_MS) return;
+    } else if (staleMonitor.ran) {
+      return;
+    }
+    staleMonitor.scheduled = true;
+    var delay = typeof opts.delay === 'number' ? opts.delay : 1200;
+    var run = function () {
+      staleMonitor.scheduled = false;
+      if (force) {
+        if (Date.now() - staleMonitor.lastRunAt < STALE_RECHECK_MS) return;
+      } else if (staleMonitor.ran) {
+        return;
+      }
+      staleMonitor.ran = true;
+      staleMonitor.lastRunAt = Date.now();
+      detectStaleAnnotations();
+    };
+    var start = function () {
+      var done = false;
+      var safety = 0;
+      var invoke = function () {
+        if (done) return;
+        done = true;
+        if (safety) window.clearTimeout(safety);
+        run();
+      };
+      if (typeof window.requestIdleCallback === 'function') {
+        try {
+          window.requestIdleCallback(invoke, { timeout: 2000 });
+          // Some embedders expose requestIdleCallback but never fire it.
+          safety = window.setTimeout(invoke, 2600);
+          return;
+        } catch (err) { /* fall back to a plain timeout */ }
+      }
+      window.setTimeout(invoke, 0);
+    };
+    window.setTimeout(start, delay);
   }
 
   /* ------------------------------------------------------------------- events */
@@ -1710,25 +1875,90 @@
     onMarkHotkey(event);
   }
 
-  document.addEventListener('contextmenu', onContextMenu, true);
-  document.addEventListener('mousemove', onPointerMove, true);
-  document.addEventListener('mouseover', onMouseOver, true);
-  document.addEventListener('mouseout', onMouseOut, true);
-  document.addEventListener('click', onClick, true);
-  document.addEventListener('mousedown', closeOnOutside, true);
-  document.addEventListener('click', closeOnOutside, true);
-  document.addEventListener('selectionchange', onSelectionChange);
-  document.addEventListener('mouseup', onSelectionMouseUp, true);
-  window.addEventListener('scroll', function () {
+  function onScroll() {
     hideSelectionButton();
     // Opening a card can itself scroll the page (scrollIntoView / deep links);
     // that scroll must not immediately close the card it was opened for.
     if (Date.now() < state.scrollLock) return;
-    if (state.note && !state.note.card.isPinned()) closeNote(true);
-  }, { passive: true });
-  window.addEventListener('keydown', onGlobalKeyDown);
+    if (!state.note) return;
+    var card = state.note.card;
+    if (card && typeof card.isPinned === 'function' && card.isPinned()) return;
+    // Marking opens a temporarily resident card; scrolling must not dismiss it.
+    if (noteIsSticky()) return;
+    // Scrolling while typing a follow-up question or a note keeps the card.
+    if (cardIsTyping(card)) return;
+    closeNote(true);
+  }
+
+  /**
+   * BFCache restore: the page is shown again without re-running the script.
+   * Re-announce the current annotations and re-check staleness (throttled).
+   */
+  function onPageShow(event) {
+    if (!event || !event.persisted) return;
+    try {
+      installDebugSurface();
+      broadcastState();
+      scheduleStaleDetection({ force: true });
+    } catch (err) { /* restoring from BFCache must never throw */ }
+  }
+
+  var globalListenersBound = false;
+
+  function bindGlobalListeners() {
+    if (globalListenersBound) return;
+    globalListenersBound = true;
+    document.addEventListener('contextmenu', onContextMenu, true);
+    document.addEventListener('mousemove', onPointerMove, true);
+    document.addEventListener('mouseover', onMouseOver, true);
+    document.addEventListener('mouseout', onMouseOut, true);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('mousedown', closeOnOutside, true);
+    document.addEventListener('click', closeOnOutside, true);
+    document.addEventListener('selectionchange', onSelectionChange);
+    document.addEventListener('mouseup', onSelectionMouseUp, true);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('keydown', onGlobalKeyDown);
+  }
+
+  bindGlobalListeners();
 
   /* ------------------------------------------------------------- messaging in */
+
+  /** Public content-script state; also re-broadcast after a BFCache restore. */
+  function stateSnapshot() {
+    return {
+      ok: true,
+      url: location.href,
+      urlKey: state.urlKey,
+      enabled: !!(state.settings && state.settings.enabled),
+      contextMode: state.settings ? state.settings.contextMode : S.DEFAULT_CONTEXT_MODE,
+      annotations: state.annotations.map(function (item) {
+        return {
+          id: item.id,
+          text: item.text,
+          color: item.color,
+          marks: M.countMarks(item.id),
+          hasExplanation: !!item.explanation,
+          // Staleness is passed through as-is; it never changes the highlight.
+          stale: !!item.stale,
+          staleAt: Number(item.staleAt) || 0
+        };
+      })
+    };
+  }
+
+  function broadcastState() {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') return;
+      var payload = stateSnapshot();
+      payload.type = 'pg:stateChanged';
+      chrome.runtime.sendMessage(payload, function () {
+        try { void chrome.runtime.lastError; } catch (err) { /* ignore */ }
+      });
+    } catch (err) { /* no channel available: the popup can still query the tab */ }
+  }
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (!message || typeof message !== 'object') return undefined;
@@ -1753,16 +1983,7 @@
         sendResponse({ ok: true });
         return undefined;
       case 'pg:queryState':
-        sendResponse({
-          ok: true,
-          url: location.href,
-          urlKey: state.urlKey,
-          enabled: !!(state.settings && state.settings.enabled),
-          contextMode: state.settings ? state.settings.contextMode : S.DEFAULT_CONTEXT_MODE,
-          annotations: state.annotations.map(function (item) {
-            return { id: item.id, text: item.text, color: item.color, marks: M.countMarks(item.id), hasExplanation: !!item.explanation };
-          })
-        });
+        sendResponse(stateSnapshot());
         return undefined;
       case 'pg:removeAnnotation':
         removeTerm(message.annotationId);
@@ -1934,6 +2155,8 @@
             state.page.title = document.title;
             restorePage();
             focusFromHash();
+            // Advisory background pass; never blocks the first paint.
+            scheduleStaleDetection();
             return settings;
           })
           .catch(function (err) {
@@ -1963,8 +2186,9 @@
     boot();
   }
 
-  // Expose a tiny debug surface without polluting the page.
-  window.__pagegloss = {
+  // Expose a tiny debug surface without polluting the page. It is reinstalled
+  // (never re-bound) after a BFCache restore.
+  var debugSurface = {
     version: S.PROTOCOL_VERSION,
     state: state,
     mark: startMarking,
@@ -1972,4 +2196,12 @@
     removeTerm: removeTerm,
     clear: clearPage
   };
+
+  function installDebugSurface() {
+    try {
+      window.__pagegloss = debugSurface;
+    } catch (err) { /* a hostile page may freeze window */ }
+  }
+
+  installDebugSurface();
 })();

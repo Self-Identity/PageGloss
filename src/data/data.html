@@ -48,14 +48,26 @@
       </div>
     </header>
 
+    <div class="selection-bar" id="selectionBar">
+      <p class="selection-count" id="selectionCount" role="status" aria-live="polite"></p>
+      <div class="selection-actions">
+        <button class="btn" id="selectAll" type="button"></button>
+        <button class="btn" id="clearSelection" type="button"></button>
+        <button class="btn" id="exportSelected" type="button" hidden></button>
+        <button class="btn btn-danger" id="deleteSelected" type="button"></button>
+      </div>
+    </div>
+
     <main class="content" id="content">
       <p class="status" id="status" role="status" aria-live="polite" hidden></p>
       <div class="sites" id="sites"></div>
     </main>
   </div>
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
   <script src="../shared/messages.js"></script>
   <script src="../shared/i18n.js"></script>
   <script src="../shared/storage.js"></script>
+  <script src="../content/card.js"></script>
   <script src="data.js"></script>
 </body>
 </html>
