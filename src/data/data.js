@@ -548,22 +548,21 @@
     var name = el('span', 'site-name', siteLabel(group.key));
     name.title = group.key;
     toggle.appendChild(name);
+    var meta = el('span', 'site-meta');
+    meta.textContent = t('dataPagesCount', { n: group.pages.length }) +
+      ' · ' + t('dataAnnotationsCount', { n: group.annotations });
+    toggle.appendChild(meta);
     toggle.addEventListener('click', function () {
       state.siteClosed[group.key] = open;
       render();
     });
     head.appendChild(toggle);
 
-    var meta = el('span', 'site-meta');
-    meta.textContent = t('dataPagesCount', { n: group.pages.length }) +
-      ' · ' + t('dataAnnotationsCount', { n: group.annotations });
-    head.appendChild(meta);
-
     var actions = el('div', 'site-actions');
     actions.appendChild(iconButton(
       '',
       'download',
-      t('dataExportSelected') + ' · ' + siteLabel(group.key),
+      t('dataExportSite') + ' · ' + siteLabel(group.key),
       function () { exportSite(group); }
     ));
     actions.appendChild(iconButton(
@@ -641,7 +640,7 @@
     actions.appendChild(iconButton(
       '',
       'download',
-      t('dataExportSelected') + ' · ' + label,
+      t('dataExportPage') + ' · ' + label,
       function () { exportPage(page); }
     ));
     actions.appendChild(iconButton(
