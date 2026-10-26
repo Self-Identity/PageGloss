@@ -776,6 +776,11 @@
     var mode = (state.settings && state.settings.matchMode) || S.DEFAULT_MATCH_MODE;
     if (mode !== 'smart' && mode !== 'loose' && mode !== 'strict') mode = 'smart';
     var wordLike = S.isWordLikeNeedle(needle);
+    if (opts.allowLoose) {
+      // One-shot substring match confirmed by the user; the global mode and the
+      // stored settings are untouched.
+      return { matches: M.findMatches(map, needle, { limit: limit }), mode: 'substring', strict: true };
+    }
     if (mode === 'loose' || !wordLike) {
       // Substring matching: loose by request, or the only sensible option for CJK.
       return { matches: M.findMatches(map, needle, { limit: limit }), mode: 'substring', strict: true };
@@ -807,7 +812,7 @@
         truncated = true;
         break;
       }
-      var result = matchNeedle(map, needle.text, budget, { strict: opts.strict });
+      var result = matchNeedle(map, needle.text, budget, { strict: opts.strict, allowLoose: opts.allowLoose });
       if (result.strict === false && !result.matches.length) looseOnly = true;
       if (result.matches.length >= budget) truncated = true;
       for (var m = 0; m < result.matches.length; m++) {
@@ -1407,6 +1412,30 @@
       openNote(existing, { mark: mark, pin: false, auto: false });
       return;
     }
+    // smart mode no longer silently falls back to substring matching: when the
+    // text only appears inside longer words, ask once and let the answer apply
+    // to this marking only (the global mode is left alone).
+    var allowLoose = !!info.allowLoose;
+    var markMode = (state.settings && state.settings.matchMode) || S.DEFAULT_MATCH_MODE;
+    if (!allowLoose && markMode === 'smart' && S.isWordLikeNeedle(text)) {
+      var probe = M.buildTextMap(document.body);
+      var strictHits = M.findMatches(probe, text, { wholeWord: true, limit: 1 });
+      if (!strictHits.length) {
+        var looseHits = M.findMatches(probe, text, { limit: 1 });
+        if (looseHits.length) {
+          showToast(t('toastLooseAsk'), {
+            duration: 8000,
+            action: {
+              label: t('toastLooseUse'),
+              run: function () {
+                startMarking(Object.assign({}, info, { allowLoose: true }));
+              }
+            }
+          });
+          return null;
+        }
+      }
+    }
     var annotation = {
       id: S.uuid(),
       text: text,
@@ -1417,11 +1446,12 @@
       note: '',
       marks: 0,
       anchors: [],
-      explanation: ''
+      explanation: '',
+      looseMatch: allowLoose
     };
     annotation.anchorElement = info.anchorElement;
     annotation.sentence = info.sentence || M.sentenceAround(info.anchorElement, text);
-    var result = markAnnotation(annotation, { wholeSentence: false });
+    var result = markAnnotation(annotation, { wholeSentence: false, allowLoose: allowLoose });
     if (!result.created) {
       showToast(t('toastNotFound'), { duration: 3600 });
       return;
@@ -1661,8 +1691,12 @@
         }
       });
       if (!offsets.length && needle) {
-        // No usable anchors left; look the text up again before giving up.
-        var found = M.findMatches(pageMap, needle, { wholeWord: false, limit: S.MAX_MARKS_PER_ANNOTATION });
+        // No usable anchors left; look the text up again before giving up. A
+        // loose marking re-locates loosely, a strict one stays whole-word.
+        var found = M.findMatches(pageMap, needle, {
+          wholeWord: !annotation.looseMatch,
+          limit: S.MAX_MARKS_PER_ANNOTATION
+        });
         offsets = M.mergeRanges(found.map(function (match) {
           return {
             start: match.start,

@@ -343,6 +343,20 @@ function queryAll(root, selector) {
 
 /** Build the canned body markup. kind: 'words' for the word-boundary fixture. */
 function parseBody(document, kind) {
+  if (kind === 'ma' || kind === 'ma-embedded') {
+    // "MA" must not mark make/matter/mark/human: the strict fixture keeps one
+    // standalone MA, the embedded one has none.
+    const maRoot = new Element('div');
+    maRoot.setAttribute('id', 'pg-root');
+    const sentence = kind === 'ma'
+      ? 'make matter mark human MA'
+      : 'make matter mark human';
+    const maParagraph = new Element('p');
+    maParagraph.setAttribute('id', 'pg-ma');
+    maParagraph.appendChild(new TextNode(sentence));
+    maRoot.appendChild(maParagraph);
+    return maRoot;
+  }
   if (kind === 'changed') {
     // Same URL, completely different article: cached annotations must not be
     // drawn over unrelated words (the reported misalignment bug).
@@ -983,6 +997,37 @@ async function main() {
     const annotation = restarted.sandbox.window.__pagegloss.state.annotations[0];
     assertEqual(annotation.stale, true, 'the cached annotation is flagged as stale');
     assertEqual(annotation.marks, 0, 'no live marks are reported');
+  });
+
+  await test('a short token only marks the standalone word', async () => {
+    const env = bootContent('ma');
+    await waitFor(() => env.sandbox.window.__pagegloss.state.settings);
+    env.sandbox.window.__pagegloss.mark({
+      text: 'MA',
+      anchorElement: env.document.body.childNodes[0].childNodes[0].childNodes[0],
+      sentence: 'make matter mark human MA'
+    });
+    await waitFor(() => env.sandbox.window.__pagegloss.state.annotations.length === 1);
+    const marks = marksIn(env.document);
+    assertEqual(marks.length, 1, 'only the standalone MA is marked');
+    assertEqual(marks[0].textContent, 'MA', 'the marked text is MA');
+    const bodyText = env.document.body.textContent;
+    ['make', 'matter', 'mark', 'human'].forEach((word) => {
+      assert(bodyText.indexOf(word) >= 0, word + ' stays untouched text');
+    });
+  });
+
+  await test('a short token found only inside words asks before matching substrings', async () => {
+    const env = bootContent('ma-embedded');
+    await waitFor(() => env.sandbox.window.__pagegloss.state.settings);
+    env.sandbox.window.__pagegloss.mark({
+      text: 'MA',
+      anchorElement: env.document.body.childNodes[0].childNodes[0].childNodes[0],
+      sentence: 'make matter mark human'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assertEqual(marksIn(env.document).length, 0, 'nothing is marked without confirmation');
+    assertEqual(env.sandbox.window.__pagegloss.state.annotations.length, 0, 'no annotation is stored yet');
   });
 
   const failed = results.filter((item) => !item.ok);

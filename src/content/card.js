@@ -73,6 +73,11 @@
     '  transition: opacity 150ms ease-out, transform 150ms ease-out, visibility 0s linear 0s;',
     '}',
     '.note.leaving { opacity: 0; transform: translateX(-4px); }',
+    '.readonly-meta {',
+    '  flex-shrink: 0; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--pg-border);',
+    '  font-size: 11.5px; color: var(--pg-fg-dim); white-space: nowrap; overflow: hidden;',
+    '  text-overflow: ellipsis;',
+    '}',
     '.note-title {',
     '  flex-shrink: 0; font-size: 10.5px; font-weight: 680; letter-spacing: .05em;',
     '  text-transform: uppercase; color: var(--pg-fg-dim); white-space: nowrap;',
@@ -1214,6 +1219,15 @@
       var explanationMd = addAssistantBubble();
       explanationMd.innerHTML = renderMarkdown(explanation);
       explanationMd.dataset.raw = explanation;
+    }
+
+    if (readOnly && opts.metaText) {
+      // Last line of the annotation window: the updated time, kept out of the
+      // data page cells.
+      var metaLine = document.createElement('div');
+      metaLine.className = 'readonly-meta';
+      metaLine.textContent = String(opts.metaText);
+      card.appendChild(metaLine);
     }
 
     // The first paint always starts at the top of the message area. Streaming

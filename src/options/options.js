@@ -109,7 +109,7 @@
     renderMatchModes();
     el('cardHoverOpen').checked = !!settings.cardHoverOpen;
     el('selectionButton').checked = settings.selectionButton !== false;
-    el('markHotkey').value = settings.markHotkey || 'Alt+Q';
+    el('markHotkey').value = settings.markHotkey || 'Alt+W';
     el('language').value = settings.language || 'auto';
   }
 
@@ -172,7 +172,7 @@
       matchMode: (document.querySelector('#matchModes input[name="pg-match-mode"]:checked') || {}).value || state.settings.matchMode,
       cardHoverOpen: el('cardHoverOpen').checked,
       selectionButton: el('selectionButton').checked,
-      markHotkey: el('markHotkey').value || 'Alt+Q',
+      markHotkey: el('markHotkey').value || 'Alt+W',
       language: el('language').value
     };
     if (overrides) Object.keys(overrides).forEach(function (key) { patch[key] = overrides[key]; });
@@ -355,7 +355,7 @@
   }
 
   /**
-   * Normalise a keydown into a combination like "Alt+Q" or "Ctrl+Shift+K".
+   * Normalise a keydown into a combination like "Alt+W" or "Ctrl+Shift+K".
    * Returns '' for modifier-only presses so the field never records junk.
    */
   function comboFromEvent(event) {
@@ -505,7 +505,7 @@
       el('markHotkey').select();
     });
     el('resetHotkey').addEventListener('click', function () {
-      el('markHotkey').value = 'Alt+Q';
+      el('markHotkey').value = 'Alt+W';
       scheduleSave();
     });
     el('fetchModels').addEventListener('click', fetchModels);

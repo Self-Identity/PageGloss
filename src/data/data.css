@@ -19,6 +19,13 @@
   --pg-shadow: 0 1px 2px rgba(16, 24, 40, .05);
   --pg-pop-shadow: 0 18px 44px rgba(16, 24, 40, .18);
   --pg-mono: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  /* Three nesting levels, progressively stronger: site -> page -> marks. */
+  --pg-lvl-1: rgba(47, 109, 246, .05);
+  --pg-lvl-2: rgba(47, 109, 246, .09);
+  --pg-lvl-3: rgba(47, 109, 246, .14);
+  --pg-lvl-bar-1: #2f6df6;
+  --pg-lvl-bar-2: #5b8df8;
+  --pg-lvl-bar-3: #86abfa;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -39,6 +46,12 @@
     --pg-danger-border: #6d3a36;
     --pg-shadow: 0 1px 2px rgba(0, 0, 0, .3);
     --pg-pop-shadow: 0 20px 52px rgba(0, 0, 0, .55);
+    --pg-lvl-1: rgba(111, 155, 255, .07);
+    --pg-lvl-2: rgba(111, 155, 255, .12);
+    --pg-lvl-3: rgba(111, 155, 255, .18);
+    --pg-lvl-bar-1: #6f9bff;
+    --pg-lvl-bar-2: #8fb3ff;
+    --pg-lvl-bar-3: #b3cbff;
   }
 }
 
@@ -362,8 +375,8 @@ body:not(.select-mode) .check {
   min-width: 0;
   border: 1px solid var(--pg-border);
   border-radius: var(--pg-radius);
-  background: var(--pg-surface);
-  box-shadow: var(--pg-shadow);
+  background: var(--pg-lvl-1);
+  box-shadow: inset 3px 0 0 var(--pg-lvl-bar-1), var(--pg-shadow);
 }
 
 .site-head {
@@ -466,7 +479,8 @@ body:not(.select-mode) .check {
   min-width: 0;
   border: 1px solid var(--pg-border);
   border-radius: 10px;
-  background: var(--pg-surface-2);
+  background: var(--pg-lvl-2);
+  box-shadow: inset 3px 0 0 var(--pg-lvl-bar-2);
 }
 
 .page-row {
@@ -569,6 +583,11 @@ body:not(.select-mode) .check {
 
 .marks-wrap {
   min-width: 0;
+  padding: 8px;
+  border-radius: 10px;
+  /* Third nesting level: the strongest tint and bar of the three. */
+  background: var(--pg-lvl-3);
+  box-shadow: inset 3px 0 0 var(--pg-lvl-bar-3);
 }
 
 .marks-empty {
@@ -592,9 +611,9 @@ body:not(.select-mode) .check {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 76px;
+  height: 80px;
   border-radius: 9px;
-  background: var(--pg-surface-3);
+  background: var(--pg-surface);
   color: var(--pg-fg);
 }
 
@@ -621,14 +640,15 @@ body:not(.select-mode) .check {
   gap: 5px;
   width: 100%;
   min-width: 0;
-  min-height: 76px;
+  height: 80px;
   padding: 8px 9px 8px 27px;
   border: 0;
   border-radius: 9px;
   background: transparent;
   color: var(--pg-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1.45;
   text-align: start;
   white-space: normal;
@@ -649,7 +669,9 @@ body:not(.select-mode) .check {
   overflow: hidden;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-weight: 550;
+  font-weight: 700;
+  letter-spacing: .01em;
+  color: var(--pg-fg);
 }
 
 .mark-foot {

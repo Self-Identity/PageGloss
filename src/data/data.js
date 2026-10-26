@@ -27,7 +27,7 @@
 
   var PAGE_ROWS = 10;
   var GRID_COLUMNS = 5;
-  var GRID_ROWS = 10;
+  var GRID_ROWS = 4; // 4 x 5 = twenty marks per page
   var GRID_PAGE_SIZE = GRID_COLUMNS * GRID_ROWS; // 50 marks per page
   var HOVER_CLOSE_DELAY = 180;
   var TOAST_DURATION = 3200;
@@ -395,8 +395,16 @@
   function selectAllSites() {
     if (state.working) return;
     state.selection = emptySelection();
+    // Select every level explicitly: sites alone would leave the page and mark
+    // checkboxes visually unchecked even though the site implies them.
     state.groups.forEach(function (group) {
       state.selection.sites[group.key] = true;
+      group.pages.forEach(function (page) {
+        var key = pageKeyOf(page);
+        state.selection.pages[key] = true;
+        var ids = annotationIdsOf(page);
+        if (Object.keys(ids).length) state.selection.anns[key] = ids;
+      });
     });
     render();
   }
@@ -827,8 +835,8 @@
       badge.title = t('dataStaleHint');
       foot.appendChild(badge);
     }
-    foot.appendChild(el('span', 'mark-time', updatedLine(annotation.updatedAt || annotation.createdAt)));
-    hit.appendChild(foot);
+    // The updated time lives in the hover card (its last line), not in the cell.
+    if (foot.childNodes.length) hit.appendChild(foot);
     if (text) hit.setAttribute('aria-label', text + ' — ' + t('dataOpenHint'));
 
     hit.addEventListener('mouseenter', function () {
@@ -1346,6 +1354,8 @@
         color: annotation && annotation.color ? String(annotation.color) : '',
         explanation: explanationText(page, annotation),
         note: annotation && typeof annotation.note === 'string' ? annotation.note : '',
+        // Shown as the last line of the annotation window.
+        metaText: updatedLine(annotation && (annotation.updatedAt || annotation.createdAt)),
         position: { x: Math.round(rect.left), y: Math.round(rect.bottom + 8) }
       });
     } catch (err) {
