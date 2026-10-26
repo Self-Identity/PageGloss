@@ -1,1 +1,0 @@
-{"ok":true,"listeners":["onInstalled","onStartup","storage.onChanged","contextMenus.onShown","contextMenus.onClicked","tabs.onUpdated","commands.onCommand","onConnect","onMessage"],"badListeners":[]}

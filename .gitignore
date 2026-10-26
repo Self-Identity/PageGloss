@@ -14,3 +14,10 @@ Thumbs.db
 
 # Reserved for the future Obsidian integration (not implemented yet)
 obsidian-test/
+
+# Local-only notes: roadmap, scratch plans. Never pushed.
+ROADMAP.local.md
+*.local.md
+
+# Test report written by the ESM smoke test
+build/esm-report.json

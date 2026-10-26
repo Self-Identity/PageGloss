@@ -1,4 +1,4 @@
-# PageGloss 划词解释
+# PageGloss
 
 选中一段文本，使用悬浮按钮或右键菜单把**整页所有重复出现的目标内容**用同一种浅色标出来，并调用**你自己配置的 LLM** 生成注释；鼠标悬停在标记上就能看解释，还能像用 AI 对话应用一样继续追问，且支持快捷笔记，还可查看、导出全部标注数据。
 
@@ -7,7 +7,13 @@
 - 全部数据只保存在本机浏览器，不经过任何第三方服务器
 - **标注数据总览**：设置页 → 数据 → 查看，按站点分层浏览全部标注与笔记，支持多选批量删除、JSON 导出/导入、全屏阅读
 
-**语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
+**语言 / Language:** [中文](#pagegloss) · [English](#english)
+
+## 1.2.0 更新
+
+- 版本号提升到 **1.2.0**，作为首个公开发布候选。
+- 已完成仓库与发行包的隐私自检：无 API Key、令牌、个人路径或用户标注数据进入版本库。
+- 演示数据仍由 `dev/seed-demo.html` 手动写入（不参与打包），可用于验证数据总览页。
 
 ## 1.1.13 更新
 
@@ -457,7 +463,13 @@ Select text, then use the floating button or the context menu to highlight **eve
 - Zero dependencies, plain JS/CSS, no build step: load the folder unpacked
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
-**Language:** [中文](#pagegloss-划词解释) · [English](#english)
+**Language:** [中文](#pagegloss) · [English](#english)
+
+## Changes in 1.2.0
+
+- Version bumped to **1.2.0**, the first public-release candidate.
+- Repository and release archive audited: no API keys, tokens, personal paths or user annotation data are committed.
+- Demo data is still written manually through `dev/seed-demo.html` (excluded from the package) for checking the annotation overview.
 
 ## Changes in 1.1.13
 

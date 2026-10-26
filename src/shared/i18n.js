@@ -7,14 +7,14 @@
 
   var MESSAGES = {
     zh: {
-      appName: 'PageGloss 划词解释',
+      appName: 'PageGloss',
       menuMark: 'PageGloss：标记并解释“%s”',
       menuMarkShort: 'PageGloss：标记并解释所选文本',
       menuUnmarkOne: 'PageGloss：取消此处标记',
       menuUnmarkTerm: 'PageGloss：取消“%s”的全部标记',
       menuUnmarkAll: 'PageGloss：清空本页全部标记',
       menuDisabled: 'PageGloss（本页已暂停）',
-      cmdToggle: '开启 / 暂停 PageGloss 划词标记',
+      cmdToggle: '开启 / 暂停 PageGloss',
       toastMarked: '已标记 %n 处并生成注释',
       toastMarkedLoose: '本页没有独立出现的该词，已按包含它的 %n 处标记',
       toastMarkedNoLlm: '已标记 %n 处（LLM 未配置，仅标记）',
