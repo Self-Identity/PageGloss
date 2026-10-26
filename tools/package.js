@@ -18,8 +18,8 @@ const INCLUDE_FILES = ['manifest.json', 'LICENSE'];
 
 // dev/ holds development-only helpers (for example the demo data seeder). It is
 // never shipped: the published package must not contain demo annotations or any
-// other test scaffolding.
-const EXCLUDED_DIRS = ['dev', 'build', 'tests', 'tools'];
+// other test scaffolding. src/assets holds README screenshots, not runtime files.
+const EXCLUDED_DIRS = ['dev', 'build', 'tests', 'tools', 'src/assets'];
 
 function isExcluded(full) {
   const relative = path.relative(ROOT, full).replace(/\\/g, '/');
