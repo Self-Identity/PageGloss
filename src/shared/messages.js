@@ -30,7 +30,7 @@
     contextMode: DEFAULT_CONTEXT_MODE,
     matchMode: DEFAULT_MATCH_MODE,
     markSentenceTokens: false,
-    markHotkey: 'Alt+Q',
+    markHotkey: 'Alt+W',
     selectionButton: true,
     apiBaseUrl: '',
     apiKey: '',

@@ -513,7 +513,10 @@ async function main() {
     await waitFor(() => chrome.listeners.onConnect.length > 0);
     const port = startPort(chrome, EXPLAIN_PAYLOAD);
     await waitFor(() => port.messages.some((message) => message.type === 'done'));
-    assertEqual(system, 'CUSTOM SYSTEM PROMPT', 'custom prompt used verbatim');
+    // The custom prompt is kept, and the interface language is appended after it
+    // so a Chinese UI still gets Chinese answers.
+    assert(system.indexOf('CUSTOM SYSTEM PROMPT') === 0, 'custom prompt comes first: ' + system);
+    assert(/始终使用简体中文回答|Always answer in English/.test(system), 'language directive appended: ' + system);
   });
 
   await test('follow-up questions include the previous chat history', async () => {
@@ -1016,6 +1019,20 @@ async function main() {
     assertEqual(error.code, 'http', 'http error code');
     assertEqual(error.status, 503, 'real status preserved');
     assertEqual(calls, 2, 'one retry was made');
+  });
+
+  await test('the interface language is appended to every system prompt', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { language: 'en', systemPrompt: '' });
+    let system = '';
+    loadServiceWorker(chrome, async (url, init) => {
+      system = JSON.parse(init.body).messages[0].content;
+      return sseResponse([sseChunk('ok'), 'data: [DONE]\n\n']);
+    });
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'done'));
+    assert(system.indexOf('Always answer in English.') >= 0, 'English directive: ' + system.slice(-80));
   });
 
   const failed = results.filter((item) => !item.ok);

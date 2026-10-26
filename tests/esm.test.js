@@ -134,7 +134,6 @@ function main() {
       'contextMenus.onShown',
       'contextMenus.onClicked',
       'tabs.onUpdated',
-      'commands.onCommand',
       'onConnect',
       'onMessage'
     ];

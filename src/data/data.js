@@ -1535,10 +1535,20 @@
       dom.importFile.value = '';
       if (file) importData(file);
     });
-    applyLabels();
-    updateToolbar();
-    wire();
-    load();
+    // The data page must follow the language chosen in the options page, not
+    // the browser UI language.
+    Store.getSettings().then(function (settings) {
+      I = window.PageGlossI18n.create(settings && settings.language);
+      applyLabels();
+      updateToolbar();
+      wire();
+      load();
+    }).catch(function () {
+      applyLabels();
+      updateToolbar();
+      wire();
+      load();
+    });
   }
 
   init();

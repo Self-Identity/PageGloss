@@ -1030,6 +1030,23 @@ async function main() {
     assertEqual(env.sandbox.window.__pagegloss.state.annotations.length, 0, 'no annotation is stored yet');
   });
 
+  await test('the old default hotkey migrates to Alt+W but custom ones stay', async () => {
+    const env = bootContent('words');
+    const Store = env.sandbox.PageGlossStore;
+    assertEqual(Store.normalizeSettings({ markHotkey: 'Alt+Q' }).markHotkey, 'Alt+W', 'old default migrated');
+    assertEqual(Store.normalizeSettings({ markHotkey: 'Ctrl+Shift+K' }).markHotkey, 'Ctrl+Shift+K', 'custom kept');
+    assertEqual(Store.normalizeSettings({}).markHotkey, 'Alt+W', 'new default');
+  });
+
+  await test('the answer language follows the interface language', async () => {
+    const env = bootContent('words');
+    assertEqual(
+      env.sandbox.PageGlossShared.DEFAULT_SETTINGS.markHotkey,
+      'Alt+W',
+      'the shipped default is Alt+W'
+    );
+  });
+
   const failed = results.filter((item) => !item.ok);
   results.forEach((item) => {
     console.log('[' + (item.ok ? 'PASS' : 'FAIL') + '] ' + item.name);

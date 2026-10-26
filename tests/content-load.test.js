@@ -532,7 +532,7 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 200));
     const notice = shadowText(env.document.body);
     assert(
-      !/未配置 LLM/.test(notice),
+      !/未配置 LLM|not configured/i.test(notice),
       'no startup nag: ' + notice.slice(0, 120)
     );
   });
@@ -553,10 +553,10 @@ async function main() {
     });
     const notice = await waitFor(() => {
       const text = shadowText(env.document.body);
-      return /未配置 LLM/.test(text) ? text : '';
+      return /未配置 LLM|not configured/i.test(text) ? text : '';
     });
-    assert(/未配置 LLM/.test(notice), 'the notice appears on use, got: ' + notice.slice(0, 160));
-    assert(/API Key/.test(notice), 'toast should name the missing field, got: ' + notice);
+    assert(/未配置 LLM|not configured/i.test(notice), 'the notice appears on use, got: ' + notice.slice(0, 160));
+    assert(/API ?key/i.test(notice), 'toast should name the missing field, got: ' + notice);
     const host = allElements(env.document.body).find((node) => node.tagName === 'PAGEGLOSS-UI');
     assert(host, 'a toast host exists');
   });
@@ -589,7 +589,7 @@ async function main() {
     assertEqual(calls[0].length, 1, 'the full sentence was matched once');
     assert(result, 'a card is returned so the user can retry after configuring');
     const notice = shadowText(env.document.body);
-    assert(/未配置 LLM/.test(notice), 'the notice is visible in the card as well, got: ' + notice.slice(0, 120));
+    assert(/未配置 LLM|not configured/i.test(notice), 'the notice is visible in the card as well, got: ' + notice.slice(0, 120));
   });
 
   const failed = results.filter((item) => !item.ok);

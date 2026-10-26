@@ -630,6 +630,17 @@
   }
 
   function bind() {
+    // The content script broadcasts after a SPA route change; re-query so the
+    // annotation list follows the new URL even without a page reload.
+    if (chrome.runtime && chrome.runtime.onMessage) {
+      chrome.runtime.onMessage.addListener(function (message) {
+        if (!message || message.type !== 'pg:stateChanged') return;
+        var key = message.urlKey || '';
+        if (key && key !== S.normalizeUrlKey(tabUrl())) return;
+        refreshPageState();
+      });
+    }
+
     el('help').addEventListener('click', function (event) {
       // Open the bundled help page in a tab; a popup cannot navigate itself.
       event.preventDefault();

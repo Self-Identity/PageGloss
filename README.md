@@ -5,8 +5,17 @@
 - Chrome / Edge 通用（Manifest V3）
 - 零依赖原生 JS / CSS，无需构建，直接「加载已解压的扩展程序」
 - 全部数据只保存在本机浏览器，不经过任何第三方服务器
+- **标注数据总览**：设置页 → 数据 → 查看，按站点分层浏览全部标注与笔记，支持多选批量删除、JSON 导出/导入、全屏阅读
 
 **语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
+## 1.1.7 更新
+
+- **移除全局开关快捷键**：删掉 `Alt+Shift+G` 的启停命令，安装后默认生效；标记快捷键默认改为 **`Alt+W`**，旧默认值 `Alt+Q` 会自动迁移，自定义组合保持不动。帮助页改为**动态显示**你当前配置的快捷键。
+- **帮助页中英双语**：右上角新增「中文 / English」切换（记忆上次选择），右下角加入与设置页同款的 GitHub 跳转；「三步上手」升级为**四步上手**，补充悬浮窗快速入口与**标注数据总览**说明。
+- **修复 SPA 换 path 后弹窗不刷新**：内容脚本监听 `pushState` / `replaceState` / `popstate` / `hashchange`（含定时兜底），路由变化时清掉旧标记、按新 URL 加载各自的标注并广播；弹窗收到广播后立即刷新「本页标注」。
+- **语言设置真正统一**：设置页「界面语言」更名为「语言」；选择中文/英文后，系统提示末尾会追加对应语言要求（自定义提示词也生效）；数据页、全屏阅读页也会读取该语言，不再跟随浏览器语言。
+- **README 强调标注总览**：首屏要点与英文版均新增总览入口说明。
 
 ---
 
@@ -270,9 +279,11 @@ https://api.example.com/models       ← 去掉 /v1 的回退（DeepSeek 属于�
 
 | 快捷键 | 作用 |
 | --- | --- |
-| `Alt + Shift + G` | 开启 / 暂停 PageGloss 划词标记 |
-| `Esc` | 关闭当前注释卡片 |
+| `Alt + W`（默认，可在设置页自定义） | 标记并解释选中的文本 |
+| `Esc` | 关闭当前注释卡片 / 取消选区 |
 | 右键菜单 | 标记、取消此处、取消该词全部、清空本页 |
+
+> 没有全局开关快捷键：安装后默认生效，需要暂停时用弹窗顶部的开关。帮助页会动态显示你当前配置的组合键。
 
 ---
 
@@ -457,13 +468,14 @@ A full endpoint (`.../chat/completions`) is used verbatim; query strings survive
 
 ## Usage
 
-- Select text, then right-click and choose "Mark and explain", press the shortcut (default `Alt+Q`), or click the floating button that appears 100px from the cursor.
+- Select text, then right-click and choose "Mark and explain", press the shortcut (default `Alt+W`, customisable), or click the floating button that appears 100px from the cursor.
 - Every occurrence on the page is highlighted with one consistent colour; the note card opens automatically.
 - Hover the card to read the explanation; the note pane slides out after 200 ms (immediately when the annotation already has a note).
 - Ask follow-up questions in the card; answers are stored with the annotation.
 - Pin the card to keep it open. Otherwise it closes on an outside click, on scroll (not while you are typing), or via the close button. A card opened right after marking stays until you click outside or close it.
 - Right-click an existing mark to remove that occurrence or all occurrences; "Clear every mark on this page" asks for confirmation first.
-- The data page (options → Data → View) lists everything grouped by site, with multi-select delete, JSON export/import, and a full-page reader for each annotation.
+- **Annotation overview**: options → Data → View lists everything grouped by site, with multi-select bulk delete, JSON export/import, and a full-page reader for each annotation.
+- The help page is bilingual (中文 / English) and shows your own hotkey; there is no global toggle shortcut — the extension is active once installed.
 
 ## Privacy
 

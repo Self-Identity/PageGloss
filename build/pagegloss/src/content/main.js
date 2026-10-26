@@ -2240,6 +2240,72 @@
     openNote(annotation, { mark: mark, pin: false, auto: false });
   }
 
+  /* ------------------------------------------------ single page app navigation */
+
+  var urlWatcher = { installed: false, last: '' };
+
+  /**
+   * A history API navigation changes the URL without reloading the document.
+   * The cached annotations belong to the previous URL, so drop the old marks
+   * and load the new URL's own annotation set.
+   */
+  function handleUrlChange() {
+    var nextKey = S.normalizeUrlKey(location.href);
+    if (!nextKey || nextKey === state.urlKey) return;
+    // Persist the open thread against the page we are leaving.
+    if (state.note) closeNote(true);
+    window.clearTimeout(saveTimer);
+    window.clearTimeout(noteSaveTimer);
+    try { M.unwrapAnnotations(null); } catch (err) { /* ignore */ }
+    state.annotations = [];
+    state.threads = {};
+    state.note = null;
+    state.urlKey = nextKey;
+    if (!state.settings || !state.settings.enabled) {
+      broadcastState();
+      return;
+    }
+    Store.getPage(nextKey).then(function (page) {
+      state.page = page;
+      state.page.url = location.href;
+      state.page.title = document.title;
+      restorePage();
+      scheduleStaleDetection({ force: true });
+      broadcastState();
+    }).catch(function () {
+      broadcastState();
+    });
+  }
+
+  function installUrlWatcher() {
+    if (urlWatcher.installed) return;
+    urlWatcher.installed = true;
+    urlWatcher.last = location.href;
+    function check() {
+      if (location.href === urlWatcher.last) return;
+      urlWatcher.last = location.href;
+      handleUrlChange();
+    }
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('popstate', check);
+      window.addEventListener('hashchange', check);
+    }
+    try {
+      if (typeof history === 'object' && history) {
+        ['pushState', 'replaceState'].forEach(function (name) {
+          var original = history[name];
+          if (typeof original !== 'function') return;
+          history[name] = function () {
+            var result = original.apply(history, arguments);
+            window.setTimeout(check, 0);
+            return result;
+          };
+        });
+      }
+    } catch (err) { /* frozen history: the periodic check still covers it */ }
+    if (typeof window.setInterval === 'function') window.setInterval(check, 1200);
+  }
+
   function boot() {
     if (!document.body) {
       // Nothing to attach marks or the card to yet; retry once the DOM exists.
@@ -2248,10 +2314,16 @@
       }, { once: true });
       return;
     }
-
+    installUrlWatcher();
     state.settingsPromise = Store.getSettings()
       .then(function (settings) {
         state.settings = settings;
+        // Cards and toasts must follow the interface language chosen in the
+        // options page, not the browser language used before settings loaded.
+        if (window.PageGlossI18n) {
+          i18n = window.PageGlossI18n.create(settings.language);
+          t = i18n.t;
+        }
         if (!settings.enabled) return settings;
         return Store.getPage(state.urlKey)
           .then(function (page) {

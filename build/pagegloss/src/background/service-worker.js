@@ -21,7 +21,7 @@ const {
 // console to confirm which build is actually running. If this line is missing
 // after a reload, Chrome is still serving a stale registration or an older
 // unpacked folder.
-const BUILD_VERSION = '1.1.6';
+const BUILD_VERSION = '1.1.7';
 console.info('[PageGloss] service worker ' + BUILD_VERSION + ' loaded (modules: shared.mjs)');
 
 const MENU_IDS = {
@@ -247,30 +247,24 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 /* ---------------------------------------------------------------- shortcut key */
 
-if (chrome.commands && chrome.commands.onCommand) {
-  chrome.commands.onCommand.addListener(async (command) => {
-    if (command !== 'toggle-mark-mode') return;
-    const settings = await getSettings();
-    const enabled = !settings.enabled;
-    await saveSettings({ enabled });
-    await queueMenuRebuild();
-    const tabs = await chrome.tabs.query({});
-    tabs.forEach((tab) => {
-      if (tab.id != null && tab.url && /^(https?|file):/.test(tab.url)) {
-        forwardToTab(tab.id, { type: 'pg:enabledChanged', enabled });
-      }
-    });
-  });
-}
+// The in-page hotkey (settings.markHotkey, default Alt+W) is handled by the
+// content script. There is no global enable/disable command any more: the
+// extension is active as soon as it is installed.
 
 /* -------------------------------------------------------------- LLM pipeline */
 
 function resolveSystemPrompt(settings) {
   const custom = (settings.systemPrompt || '').trim();
-  if (custom) return custom;
-  if (settings.language === 'en') return DEFAULT_SYSTEM_PROMPT_EN;
-  if (settings.language === 'zh') return DEFAULT_SYSTEM_PROMPT;
-  return hasChinese(settings.sampleText || '') ? DEFAULT_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT_EN;
+  let base;
+  if (custom) base = custom;
+  else if (settings.language === 'en') base = DEFAULT_SYSTEM_PROMPT_EN;
+  else if (settings.language === 'zh') base = DEFAULT_SYSTEM_PROMPT;
+  else base = hasChinese(settings.sampleText || '') ? DEFAULT_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT_EN;
+  // The interface language also decides the answer language, even when the
+  // user supplied a custom prompt.
+  if (settings.language === 'en') return base + '\n\nAlways answer in English.';
+  if (settings.language === 'zh') return base + '\n\n始终使用简体中文回答。';
+  return base;
 }
 
 function contextBlock(context) {

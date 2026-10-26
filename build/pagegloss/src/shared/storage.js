@@ -96,6 +96,10 @@
     out.maxContextChars = Math.max(500, Math.min(200000, Math.round(out.maxContextChars)));
     out.requestTimeoutMs = Math.max(5000, Math.min(600000, Math.round(out.requestTimeoutMs)));
     if (!out.systemPrompt) out.systemPrompt = '';
+    // The shipped default used to be Alt+Q. Move that exact value to the new
+    // default once, while leaving a genuinely custom combination untouched.
+    if (out.markHotkey === 'Alt+Q') out.markHotkey = 'Alt+W';
+    if (!out.markHotkey) out.markHotkey = 'Alt+W';
     return out;
   }
 

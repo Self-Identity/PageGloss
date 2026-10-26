@@ -10,7 +10,7 @@
 
   const Store = window.PageGlossStore;
   const S = window.PageGlossShared;
-  const I = window.PageGlossI18n.create();
+  let I = window.PageGlossI18n.create();
 
   const refs = {};
   const state = {
@@ -331,6 +331,12 @@
   /* ----------------------------------------------------------- page loading */
 
   async function boot() {
+    // Follow the language chosen in the options page (the reader is opened from
+    // there), not the browser UI language.
+    try {
+      const settings = await Store.getSettings();
+      I = window.PageGlossI18n.create(settings && settings.language);
+    } catch (err) { /* keep the browser default */ }
     const key = readParam('key');
     const id = readParam('id');
     state.key = key;
