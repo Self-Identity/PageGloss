@@ -7,18 +7,34 @@
 - 全部数据只保存在本机浏览器，不经过任何第三方服务器
 - **标注数据总览**：设置页 → 数据 → 查看，按站点分层浏览全部标注与笔记，支持多选批量删除、JSON 导出/导入、全屏阅读
 
+## 截图
+
+### 主要功能窗口
+
+标注卡片与右侧笔记窗：悬停查看解释、继续追问，笔记自动保存。
+
+![主要功能窗口：标注卡片与笔记窗](src/assets/main-feature-view-zh.png)
+
+### 全屏阅读页
+
+左右分栏的独立阅读页：左侧注释与追问，右侧笔记。
+
+![全屏阅读页：左注释右笔记](src/assets/fullscreen-main-feature-view-zh.png)
+
+### 标注数据总览
+
+按站点分组的全部标注，支持多选删除、导出导入与悬停查看。
+
+![标注数据总览](src/assets/data-management-view-zh.png)
+
 **语言 / Language:** [中文](#pagegloss) · [English](#english)
 
-## 1.2.1 更新
+## 1.2.0 更新
 
 - **修复全屏阅读页英文未覆盖**：页面先用浏览器语言渲染，设置里的语言加载后只重绘了正文，页头、按钮、占位提示仍停在旧语言。现在语言确定后会重新应用全部标签。
 - **弹窗新增「查看全部标注数据」**：点击直接打开标注数据总览页，与设置页的「查看」一致。
 - **许可证**：项目采用 **MIT License**（见 `LICENSE`），发行包内一并包含。
-- 版本号提升到 **1.2.1**。
-
-## 1.2.0 更新
-
-- 版本号提升到 **1.2.0**，作为首个公开发布候选。
+- 版本号 **1.2.0**，作为首个公开发布候选。
 - 已完成仓库与发行包的隐私自检：无 API Key、令牌、个人路径或用户标注数据进入版本库。
 - 演示数据仍由 `dev/seed-demo.html` 手动写入（不参与打包），可用于验证数据总览页。
 
@@ -470,18 +486,34 @@ Select text, then use the floating button or the context menu to highlight **eve
 - Zero dependencies, plain JS/CSS, no build step: load the folder unpacked
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
+## Screenshots
+
+### Main feature window
+
+Annotation card plus the note pane on the right: hover to read, keep asking, notes autosave.
+
+![Main feature window: annotation card and note pane](src/assets/main-feature-view-en.png)
+
+### Full-page reader
+
+A standalone split view: annotation and follow-ups on the left, notes on the right.
+
+![Full-page reader: annotation on the left, notes on the right](src/assets/fullscreen-main-feature-view-en.png)
+
+### Annotation overview
+
+Every annotation grouped by site, with multi-select delete, import/export and hover previews.
+
+![Annotation overview](src/assets/data-management-view-en.png)
+
 **Language:** [中文](#pagegloss) · [English](#english)
 
-## Changes in 1.2.1
+## Changes in 1.2.0
 
 - Fixed the full-page reader not switching every label to English: it rendered with the browser language first and only re-rendered the body after the saved language loaded. All labels are re-applied once the language is known.
 - The popup now has a "View all annotation data" button that opens the overview directly.
 - Licensed under **MIT** (see `LICENSE`), included in the release archive.
-- Version bumped to **1.2.1**.
-
-## Changes in 1.2.0
-
-- Version bumped to **1.2.0**, the first public-release candidate.
+- Version **1.2.0**, the first public-release candidate.
 - Repository and release archive audited: no API keys, tokens, personal paths or user annotation data are committed.
 - Demo data is still written manually through `dev/seed-demo.html` (excluded from the package) for checking the annotation overview.
 
