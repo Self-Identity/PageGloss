@@ -9,6 +9,12 @@
 
 **语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
 
+## 1.1.13 更新
+
+- **修「前端已显示标注、弹窗本页标注不更新」**：上一版命中带斜杠的旧 key 后，把 `state.urlKey` 改成了旧 key，而地址栏是不带斜杠的，于是弹窗每次查询都以为“URL 又变了”，走路由切换分支并返回空列表。
+  现在改为：**URL key 规范化**（去掉结尾 `/`，根路径除外），一个页面永远只有一个 key；旧数据仍能被找到，并在加载时**自动迁移**到规范 key（先保存新 key，再删除旧 key，日志 `[PageGloss] migrated page key A -> B`）。
+- 弹窗与内容脚本从此使用同一个规范 key，查询不再误判为路由变化。
+
 ## 1.1.12 更新
 
 - **修复「无标注页 → 有标注页」切路由后不显示**：SPA 给的 URL 常与服务端重定向后的 URL 不完全一样（少/多一个结尾 `/`、残留查询参数），而标注是按后者存储的，于是按前者取到的是空页面。现在会依次尝试「原 URL、加/去结尾斜杠、去掉查询参数」等变体，命中哪个就用哪个的 key；同时把「同 key 但上次没加载到内容」的情况允许重试。
@@ -452,6 +458,10 @@ Select text, then use the floating button or the context menu to highlight **eve
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
 **Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
+## Changes in 1.1.13
+
+- Fixed "marks show on the page but the popup list does not update": after a legacy trailing-slash key was found, `state.urlKey` was switched to that old key while the address bar kept the un-slashed URL, so every popup query looked like a new route and returned an empty list. URL keys are now canonical (trailing slash trimmed, root excepted) and legacy keys are found and migrated on load (`[PageGloss] migrated page key A -> B`).
 
 ## Changes in 1.1.12
 

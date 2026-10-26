@@ -2269,37 +2269,36 @@
 
   var urlWatcher = { installed: false, last: '' };
 
-  /** URL keys that may hold the same logical page (slash/query variants). */
+  /** URL keys that may hold the same logical page (legacy slash/query keys). */
   function urlKeyVariants(url) {
-    var key = S.normalizeUrlKey(url);
+    var canonical = S.normalizeUrlKey(url);
     var out = [];
     function push(value) {
       if (value && out.indexOf(value) < 0) out.push(value);
     }
-    push(key);
+    push(canonical);
     try {
       var parsed = new URL(url);
+      parsed.hash = '';
+      var search = parsed.search || '';
       var path = parsed.pathname;
+      // Legacy keys were stored with the raw path, including a trailing slash.
+      push(parsed.origin + path + search);
       if (path.length > 1 && /\/+$/.test(path)) {
-        var trimmed = new URL(url);
-        trimmed.pathname = path.replace(/\/+$/, '');
-        push(S.normalizeUrlKey(trimmed.toString()));
+        push(parsed.origin + path.replace(/\/+$/, '') + search);
       } else if (path && path !== '/') {
-        var slashed = new URL(url);
-        slashed.pathname = path + '/';
-        push(S.normalizeUrlKey(slashed.toString()));
+        push(parsed.origin + path + '/' + search);
       }
-    } catch (err) { /* keep the plain key */ }
-    var noQuery = key.split('?')[0];
-    push(noQuery);
-    push(noQuery + '/');
+    } catch (err) { /* keep the canonical key */ }
+    push(canonical.split('?')[0]);
     return out;
   }
 
   /**
    * SPA frameworks often produce a URL that differs from the redirected URL the
    * annotations were stored under (trailing slash, leftover query). Try the
-   * variants and adopt the key that actually holds annotations.
+   * variants, and when the hit uses a legacy key, migrate it to the canonical
+   * one so the popup and the page agree on a single key.
    */
   function loadPageForUrl(url) {
     var keys = urlKeyVariants(url);
@@ -2317,10 +2316,33 @@
     });
     return chain.then(function (found) {
       if (found) return found;
-      return Store.getPage(keys[0] || S.normalizeUrlKey(url)).then(function (page) {
-        return { key: keys[0] || S.normalizeUrlKey(url), page: page };
+      var key = keys[0] || S.normalizeUrlKey(url);
+      return Store.getPage(key).then(function (page) {
+        return { key: key, page: page };
       });
     });
+  }
+
+  /**
+   * Give the loaded page the canonical key and rewrite the legacy storage entry.
+   * Keeping two keys for one page made every popup query look like a route
+   * change, which returned an empty list.
+   */
+  function adoptPageKey(url, found) {
+    if (!found || !found.page) return null;
+    var canonical = S.normalizeUrlKey(url);
+    if (found.key && found.key !== canonical) {
+      var page = found.page;
+      page.urlKey = canonical;
+      try {
+        console.info('[PageGloss] migrated page key', found.key, '->', canonical);
+        Store.savePage(page).then(function () {
+          return Store.clearPage(found.key);
+        }).catch(function () { /* keep the old copy if migration fails */ });
+      } catch (err) { /* keep going with the in-memory page */ }
+      return page;
+    }
+    return found.page;
   }
 
   /**
@@ -2363,19 +2385,18 @@
     if (!state.settings || !state.settings.enabled) return;
     loadPageForUrl(targetUrl).then(function (found) {
       if (state.urlKey !== nextKey) return; // a newer route change won
-      if (!found || !found.page) {
+      var page = adoptPageKey(targetUrl, found);
+      if (!page) {
         broadcastState();
         return;
       }
-      if (found.key !== nextKey) {
-        // The annotations live under a slash/query variant of this URL.
-        console.info('[PageGloss] route key', nextKey, '->', found.key);
-        state.urlKey = found.key;
-      }
-      state.page = found.page;
+      state.page = page;
       state.page.url = targetUrl;
       state.page.title = document.title;
-      restoreRouteWhenReady(0, state.urlKey);
+      // The canonical key always matches the current URL, so the popup's query
+      // never mistakes the adopted legacy key for a new route.
+      state.urlKey = nextKey;
+      restoreRouteWhenReady(0, nextKey);
     }).catch(function () {
       broadcastState();
     });
@@ -2472,8 +2493,9 @@
         if (!settings.enabled) return settings;
         return loadPageForUrl(location.href)
           .then(function (found) {
-            if (found && found.key && found.key !== state.urlKey) state.urlKey = found.key;
-            state.page = (found && found.page) || { url: location.href, urlKey: state.urlKey, title: document.title, annotations: [], chats: {} };
+            var page = adoptPageKey(location.href, found);
+            state.urlKey = S.normalizeUrlKey(location.href);
+            state.page = page || { url: location.href, urlKey: state.urlKey, title: document.title, annotations: [], chats: {} };
             state.page.url = location.href;
             state.page.title = document.title;
             restorePage();

@@ -250,7 +250,11 @@
         url.searchParams.delete(key);
       });
       var search = url.searchParams.toString();
-      return url.origin + url.pathname + (search ? '?' + search : '');
+      // One page has one key: a trailing slash must not create a second bucket
+      // (SPA routers and server redirects disagree about it constantly).
+      var path = url.pathname.replace(/\/+$/, '');
+      if (!path) path = '/';
+      return url.origin + path + (search ? '?' + search : '');
     } catch (err) {
       return String(rawUrl || '');
     }

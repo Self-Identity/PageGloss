@@ -634,15 +634,24 @@ async function main() {
     });
     await waitFor(() => env.sandbox.window.__pagegloss && env.sandbox.window.__pagegloss.state.settings);
     await waitFor(() => env.chrome.__messageListeners.length > 0);
+    // This DOM stub cannot wrap text nodes, so spy on the engine call instead.
+    const MM = env.sandbox.window.PageGlossMatcher;
+    const applied = [];
+    MM.applyRanges = function (map, ranges) {
+      applied.push(ranges.length);
+      return ranges.length;
+    };
     env.chrome.__messageListeners.forEach((listener) => {
       listener({ type: 'pg:urlChanged', url: 'https://example.com/target' }, {}, () => {});
     });
     await waitFor(() => env.sandbox.window.__pagegloss.state.annotations.length === 1, 4000);
+    await waitFor(() => applied.some((count) => count === 1), 2000);
     assertEqual(
       env.sandbox.window.__pagegloss.state.urlKey,
-      'https://example.com/target/',
-      'the stored trailing-slash key is adopted'
+      'https://example.com/target',
+      'the canonical key is used even when storage had a trailing slash'
     );
+    assert(applied.some((count) => count === 1), 'the annotation ranges are applied');
   });
 
   const failed = results.filter((item) => !item.ok);
