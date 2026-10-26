@@ -630,6 +630,13 @@
   }
 
   function bind() {
+    el('help').addEventListener('click', function (event) {
+      // Open the bundled help page in a tab; a popup cannot navigate itself.
+      event.preventDefault();
+      chrome.tabs.create({ url: chrome.runtime.getURL('docs/help.html') });
+      window.close();
+    });
+
     el('enabled').addEventListener('change', async function (event) {
       var enabled = !!event.target.checked;
       state.settings = await Store.saveSettings({ enabled: enabled });
