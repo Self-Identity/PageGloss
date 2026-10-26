@@ -2275,6 +2275,15 @@
    * and load the new URL's own annotation set.
    */
   function handleUrlChange(urlOverride) {
+    try {
+      handleUrlChangeInner(urlOverride);
+    } catch (err) {
+      // Never let a route change break the polling loop; log for diagnosis.
+      console.warn('[PageGloss] route change failed:', err && err.stack ? err.stack : err);
+    }
+  }
+
+  function handleUrlChangeInner(urlOverride) {
     var targetUrl = String(urlOverride || location.href);
     var nextKey = S.normalizeUrlKey(targetUrl);
     if (!nextKey) return;
@@ -2283,7 +2292,7 @@
     // Persist the open thread against the page we are leaving.
     if (state.note) closeNote(true);
     window.clearTimeout(saveTimer);
-    window.clearTimeout(noteSaveTimer);
+    window.clearTimeout(pageSaveTimer);
     try { M.unwrapAnnotations(null); } catch (err) { /* ignore */ }
     state.annotations = [];
     state.threads = {};

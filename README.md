@@ -9,6 +9,11 @@
 
 **语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
 
+## 1.1.11 更新
+
+- **修复 SPA 路由处理崩溃**：`handleUrlChange` 里引用了一个不存在的变量 `noteSaveTimer`，一进入就抛 `ReferenceError`，导致路由切换完全没执行——这才是上一轮「切 path 后仍不更新」的直接原因。已改为正确的 `pageSaveTimer`，并给整个路由处理套上异常捕获，出错只会写一条 `[PageGloss] route change failed` 警告，不会再中断轮询。
+- 新增内容脚本回归测试：模拟后台发送 `pg:urlChanged`，要求不抛错且 `urlKey` 正确切换。
+
 ## 1.1.10 更新
 
 - **SPA 路由改写：改为事件驱动 + 三重兜底**。之前只靠页面内的 `pushState` 补丁与轮询，很多框架（或隔离世界）下会漏掉，于是出现「旧列表 + 总数为 0」或「新页面不显示标注」。现在：
@@ -441,6 +446,11 @@ Select text, then use the floating button or the context menu to highlight **eve
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
 **Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
+## Changes in 1.1.11
+
+- Fixed a crash in the SPA route handler: it referenced a non-existent `noteSaveTimer`, so every route change threw a `ReferenceError` and never switched pages. It now clears `pageSaveTimer`, and the whole handler is wrapped so a failure only logs `[PageGloss] route change failed` instead of breaking the poll.
+- Added a content-script regression test that simulates `pg:urlChanged` and asserts no error plus a switched `urlKey`.
 
 ## Changes in 1.1.10
 

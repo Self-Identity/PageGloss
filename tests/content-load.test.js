@@ -303,8 +303,10 @@ function createDocument() {
 
 function createChrome(store) {
   const sent = [];
+  const messageListeners = [];
   return {
     __sent: sent,
+    __messageListeners: messageListeners,
     runtime: {
       lastError: null,
       id: 'test',
@@ -316,7 +318,7 @@ function createChrome(store) {
         postMessage: () => {},
         disconnect: () => {}
       }),
-      onMessage: { addListener: () => {} }
+      onMessage: { addListener: (fn) => messageListeners.push(fn) }
     },
     i18n: { getUILanguage: () => 'zh-CN' },
     storage: {
@@ -590,6 +592,23 @@ async function main() {
     assert(result, 'a card is returned so the user can retry after configuring');
     const notice = shadowText(env.document.body);
     assert(/未配置 LLM|not configured/i.test(notice), 'the notice is visible in the card as well, got: ' + notice.slice(0, 120));
+  });
+
+  await test('a background SPA url change is handled without throwing', async () => {
+    const env = loadContentScriptStack(manifestFiles);
+    await waitFor(() => env.sandbox.window.__pagegloss && env.sandbox.window.__pagegloss.state.settings);
+    await waitFor(() => env.chrome.__messageListeners.length > 0);
+    const before = env.errors.length;
+    env.chrome.__messageListeners.forEach((listener) => {
+      listener({ type: 'pg:urlChanged', url: 'https://example.com/next' }, {}, () => {});
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assertEqual(env.errors.length, before, 'route change must not throw: ' + JSON.stringify(env.errors));
+    assertEqual(
+      env.sandbox.window.__pagegloss.state.urlKey,
+      'https://example.com/next',
+      'the route key switched'
+    );
   });
 
   const failed = results.filter((item) => !item.ok);
