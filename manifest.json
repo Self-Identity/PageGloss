@@ -47,7 +47,7 @@
       "css": ["src/content/inject.css"]
     }
   ],
-  "permissions": ["storage", "unlimitedStorage", "contextMenus", "scripting", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "contextMenus", "tabs"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "web_accessible_resources": [
     {

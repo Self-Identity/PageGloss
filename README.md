@@ -476,6 +476,17 @@ src/shared/messages.js  →  src/shared/i18n.js  →  src/shared/storage.js
 - 扩展不采集任何遥测数据，不含远程脚本
 - 所有渲染都经过转义，模型返回的 Markdown 不会执行 HTML/脚本
 
+## 12. 权限说明
+
+| 权限 | 用途 |
+| --- | --- |
+| `storage` / `unlimitedStorage` | 在本机保存标注、笔记、聊天记录与设置；数据量大时不触发配额错误，不使用时会随卸载清除 |
+| `contextMenus` | 右键菜单：标记并解释、取消此处/该词全部标记、清空本页 |
+| `tabs` | 打开标注数据总览、全屏阅读页、设置页；监听标签页 URL 变化以支持 SPA 切页；向当前标签页发送指令 |
+| 站点访问权限（`http://*/*`、`https://*/*`） | 在任意网页上标记与恢复标注；请求你配置的 LLM 接口；扩展只在你主动使用功能时读取当前页面文本，不上传浏览记录 |
+
+扩展不请求 `scripting`、`debugger`、`history`、`cookies` 等额外权限；没有远程代码，所有逻辑随扩展一起分发。
+
 ---
 
 # English
@@ -600,6 +611,17 @@ A full endpoint (`.../chat/completions`) is used verbatim; query strings survive
 - Only the endpoint you configure receives page text and your API key.
 - No telemetry, no remote scripts.
 - Model output is rendered through an escape-first Markdown renderer; raw HTML is never executed.
+
+## Permissions
+
+| Permission | Why it is needed |
+| --- | --- |
+| `storage` / `unlimitedStorage` | Store annotations, notes, chats and settings locally; avoids quota errors on large pages. Removed with the extension. |
+| `contextMenus` | Right-click actions: mark and explain, remove one/all marks, clear the page. |
+| `tabs` | Open the annotation overview, the full-page reader and the options page; watch tab URL changes for SPA routing; message the active tab. |
+| Site access (`http://*/*`, `https://*/*`) | Draw and restore marks on any page and call the LLM endpoint you configured. Page text is read only when you use the feature; no browsing history is uploaded. |
+
+The extension does **not** request `scripting`, `debugger`, `history`, `cookies` or any other extra permission, and ships no remote code.
 
 ## Development
 
