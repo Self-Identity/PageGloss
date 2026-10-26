@@ -343,6 +343,15 @@ function queryAll(root, selector) {
 
 /** Build the canned body markup. kind: 'words' for the word-boundary fixture. */
 function parseBody(document, kind) {
+  if (kind === 'zh') {
+    const zhRoot = new Element('div');
+    zhRoot.setAttribute('id', 'pg-root');
+    const zhParagraph = new Element('p');
+    zhParagraph.setAttribute('id', 'pg-zh');
+    zhParagraph.appendChild(new TextNode('这是目标句子，目标很重要。'));
+    zhRoot.appendChild(zhParagraph);
+    return zhRoot;
+  }
   if (kind === 'ma' || kind === 'ma-embedded') {
     // "MA" must not mark make/matter/mark/human: the strict fixture keeps one
     // standalone MA, the embedded one has none.
@@ -1045,6 +1054,25 @@ async function main() {
       'Alt+W',
       'the shipped default is Alt+W'
     );
+  });
+
+  await test('a Chinese selection marks only the selected phrase', async () => {
+    const env = bootContent('zh');
+    await waitFor(() => env.sandbox.window.__pagegloss.state.settings);
+    // Sentence token marking must stay off for CJK, otherwise the whole
+    // sentence gets highlighted.
+    env.sandbox.window.__pagegloss.state.settings.markSentenceTokens = true;
+    env.sandbox.window.__pagegloss.mark({
+      text: '目标句子，',
+      anchorElement: env.document.body.childNodes[0].childNodes[0].childNodes[0],
+      sentence: '这是目标句子，目标很重要。'
+    });
+    await waitFor(() => env.sandbox.window.__pagegloss.state.annotations.length === 1);
+    const marks = marksIn(env.document);
+    assertEqual(marks.length, 1, 'only the selected phrase matches once');
+    // The DOM stub wraps whole text nodes, so assert the recorded needle instead
+    // of the mark text: token expansion would have produced extra marks.
+    assertEqual(env.sandbox.window.__pagegloss.state.annotations[0].text, '目标句子，', 'the annotation keeps the selection');
   });
 
   const failed = results.filter((item) => !item.ok);

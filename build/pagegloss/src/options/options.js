@@ -462,6 +462,14 @@
       save({ systemPrompt: '' });
     });
 
+    // Clicking an empty prompt field fills in the built-in prompt for the
+    // current language, so the user can edit it instead of starting from zero.
+    el('systemPrompt').addEventListener('focus', function () {
+      if (el('systemPrompt').value.trim()) return;
+      el('systemPrompt').value = defaultPrompt();
+      scheduleSave();
+    });
+
     el('showDefaultPrompt').addEventListener('click', function () {
       el('systemPrompt').value = defaultPrompt();
       el('systemPrompt').focus();

@@ -1,6 +1,6 @@
 # PageGloss 划词解释
 
-选中一段文本，右键一键把**整页所有重复出现处**用同一种浅色标出来，并调用**你自己配置的 LLM** 生成注释；鼠标悬停在标记上就能看解释，还能像用 AI 对话应用一样继续追问。
+选中一段文本，使用悬浮按钮或右键菜单把**整页所有重复出现的目标内容**用同一种浅色标出来，并调用**你自己配置的 LLM** 生成注释；鼠标悬停在标记上就能看解释，还能像用 AI 对话应用一样继续追问，且支持快捷笔记，还可查看、导出全部标注数据。
 
 - Chrome / Edge 通用（Manifest V3）
 - 零依赖原生 JS / CSS，无需构建，直接「加载已解压的扩展程序」
@@ -9,13 +9,19 @@
 
 **语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
 
+## 1.1.8 更新
+
+- **中文标记只标所选内容**：句子级“逐词标记”此前对中文也会生效，导致整句被标。现在该功能只对空格分词的文本（英文等）启用，中文只标你选中的部分。
+- **SPA 路由切换后恢复标注**：不再在 URL 刚变化、新视图还没渲染时就去恢复。现在会等页面文本里出现该 URL 的标注内容（最多约 3 秒）再恢复，且“恢复失败”不会误清锚点或误标失效；弹窗同步刷新。
+- **系统提示词一键填充**：点击为空的系统提示词输入框，会自动填入当前语言对应的默认提示词（中文 / 英文），可直接编辑。
+- **README 英文简介对齐中文新版**：与中文一样强调悬浮按钮/右键入口、快捷笔记与标注数据总览。
+
 ## 1.1.7 更新
 
 - **移除全局开关快捷键**：删掉 `Alt+Shift+G` 的启停命令，安装后默认生效；标记快捷键默认改为 **`Alt+W`**，旧默认值 `Alt+Q` 会自动迁移，自定义组合保持不动。帮助页改为**动态显示**你当前配置的快捷键。
 - **帮助页中英双语**：右上角新增「中文 / English」切换（记忆上次选择），右下角加入与设置页同款的 GitHub 跳转；「三步上手」升级为**四步上手**，补充悬浮窗快速入口与**标注数据总览**说明。
 - **修复 SPA 换 path 后弹窗不刷新**：内容脚本监听 `pushState` / `replaceState` / `popstate` / `hashchange`（含定时兜底），路由变化时清掉旧标记、按新 URL 加载各自的标注并广播；弹窗收到广播后立即刷新「本页标注」。
 - **语言设置真正统一**：设置页「界面语言」更名为「语言」；选择中文/英文后，系统提示末尾会追加对应语言要求（自定义提示词也生效）；数据页、全屏阅读页也会读取该语言，不再跟随浏览器语言。
-- **README 强调标注总览**：首屏要点与英文版均新增总览入口说明。
 
 ---
 
@@ -415,7 +421,7 @@ src/shared/messages.js  →  src/shared/i18n.js  →  src/shared/storage.js
 
 # English
 
-PageGloss highlights every occurrence of the text you select, explains it with your own OpenAI-compatible LLM, and keeps a note and a chat thread next to each annotation.
+Select text, then use the floating button or the context menu to highlight **every repeated occurrence of that text on the page** in one consistent light colour, and call **your own configured LLM** to explain it. Hover a mark to read the explanation, keep asking follow-up questions like in an AI chat app, take quick notes, and browse or export all of your annotation data.
 
 - Chrome / Edge, Manifest V3
 - Zero dependencies, plain JS/CSS, no build step: load the folder unpacked

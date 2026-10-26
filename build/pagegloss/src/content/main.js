@@ -796,7 +796,9 @@
     var opts = options || {};
     var map = M.buildTextMap(document.body);
     var needles = [{ text: annotation.text, sentenceScope: false, secondary: false }];
-    if (state.settings && state.settings.markSentenceTokens && /[\s。！？!?；;]/.test(annotation.text)) {
+    if (state.settings && state.settings.markSentenceTokens &&
+      S.isWordLikeNeedle(annotation.text) &&
+      /[\s。！？!?；;]/.test(annotation.text)) {
       var tokens = M.tokenize(annotation.text, M.stopwordTable());
       for (var i = 0; i < tokens.length; i++) {
         needles.push({ text: tokens[i], sentenceScope: false, secondary: true });
@@ -1635,7 +1637,11 @@
       !(isWordChar(after) && isWordChar(raw.charAt(end - 1)));
   }
 
-  function restorePage() {
+  function restorePage(options) {
+    var opts = options || {};
+    // SPA route changes restore before the new view has necessarily rendered;
+    // a miss there must not clear anchors or mark data stale.
+    var soft = !!opts.soft;
     if (!state.page || !state.page.annotations.length) return;
     state.annotations = state.page.annotations.map(function (item) {
       var annotation = stripRuntime(item);
@@ -1726,10 +1732,12 @@
       }
       if (!offsets.length) {
         annotation.marks = 0;
-        annotation.anchors = [];
-        if (needle) {
-          annotation.stale = true;
-          annotation.staleAt = Number(annotation.staleAt) || Date.now();
+        if (!soft) {
+          annotation.anchors = [];
+          if (needle) {
+            annotation.stale = true;
+            annotation.staleAt = Number(annotation.staleAt) || Date.now();
+          }
         }
         return;
       }
@@ -2266,15 +2274,49 @@
       return;
     }
     Store.getPage(nextKey).then(function (page) {
+      if (state.urlKey !== nextKey) return; // a newer route change won
       state.page = page;
       state.page.url = location.href;
       state.page.title = document.title;
-      restorePage();
-      scheduleStaleDetection({ force: true });
-      broadcastState();
+      restoreRouteWhenReady(0, nextKey);
     }).catch(function () {
       broadcastState();
     });
+  }
+
+  function annotationTextExists(map, item) {
+    var needle = M.normalizeNeedle(item && item.text);
+    if (!needle) return false;
+    try {
+      return M.findMatches(map, needle, { wholeWord: !item.looseMatch, limit: 1 }).length > 0;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * Wait for the SPA to render the new route, then restore its annotations.
+   * Firing immediately used to run against the old DOM, so nothing was drawn
+   * and the popup saw an empty page.
+   */
+  function restoreRouteWhenReady(attempt, expectedKey) {
+    if (state.urlKey !== expectedKey) return;
+    var tries = attempt || 0;
+    var items = (state.page && state.page.annotations) || [];
+    if (!items.length) {
+      broadcastState();
+      return;
+    }
+    var map = null;
+    try { map = M.buildTextMap(document.body); } catch (err) { map = null; }
+    var ready = !!map && items.some(function (item) { return annotationTextExists(map, item); });
+    if (ready || tries >= 8) {
+      try { M.unwrapAnnotations(null); } catch (err) { /* ignore */ }
+      restorePage({ soft: true });
+      broadcastState();
+      return;
+    }
+    window.setTimeout(function () { restoreRouteWhenReady(tries + 1, expectedKey); }, 350);
   }
 
   function installUrlWatcher() {
