@@ -1623,6 +1623,18 @@
 
   /* ------------------------------------------------------------------ restore */
 
+  function isWordChar(ch) {
+    return !!ch && /[\p{L}\p{N}_]/u.test(ch);
+  }
+
+  /** True when [start, end) is delimited by non-word characters on both sides. */
+  function isWholeWordRange(raw, start, end) {
+    var before = start > 0 ? raw.charAt(start - 1) : '';
+    var after = end < raw.length ? raw.charAt(end) : '';
+    return !(isWordChar(before) && isWordChar(raw.charAt(start))) &&
+      !(isWordChar(after) && isWordChar(raw.charAt(end - 1)));
+  }
+
   function restorePage() {
     if (!state.page || !state.page.annotations.length) return;
     state.annotations = state.page.annotations.map(function (item) {
@@ -1662,6 +1674,8 @@
       // engines report an end offset one short at a node boundary, so accept the
       // one-character extension and use it when it matches exactly.
       var verified = [];
+      var wordLikeNeedle = S.isWordLikeNeedle(needle);
+      var strictNeedle = wordLikeNeedle && annotation.looseMatch !== true;
       offsets.forEach(function (offset) {
         var raw = pageMap.raw;
         var candidates = [
@@ -1672,6 +1686,9 @@
           if (M.normalizeNeedle(candidates[i]) !== needle) continue;
           var next = { start: offset.start, end: offset.end };
           if (i === 1) next.end = Math.min(offset.end + 1, raw.length);
+          // Old data may point inside a longer word (the MA / make bug). Strict
+          // annotations must land on whole words, otherwise re-locate or expire.
+          if (strictNeedle && !isWholeWordRange(raw, next.start, next.end)) continue;
           next.annotationId = offset.annotationId;
           next.color = offset.color;
           next.secondary = offset.secondary;
