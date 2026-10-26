@@ -9,6 +9,14 @@
 
 **语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
 
+## 1.1.10 更新
+
+- **SPA 路由改写：改为事件驱动 + 三重兜底**。之前只靠页面内的 `pushState` 补丁与轮询，很多框架（或隔离世界）下会漏掉，于是出现「旧列表 + 总数为 0」或「新页面不显示标注」。现在：
+  1. 后台用 `chrome.tabs.onUpdated` 捕获 SPA 的 URL 变化，主动给内容脚本发 `pg:urlChanged`；
+  2. 页面内保留 `pushState`/`replaceState`/`popstate`/`hashchange` 监听与 400ms 轮询；
+  3. 弹窗查询状态时若发现当前 URL 与内容脚本记录的不一致，立即触发切换；
+  4. 切换时先广播一次空列表（清掉上一页的行），再等服务端渲染出该 URL 的标注文本后恢复（最多约 6 秒），最后再广播一次。
+
 ## 1.1.9 更新
 
 - **修中文短词被扩成整句**：标记「差异」二字时，实际标出了「…所以换算比例也存在差异…」整段。根因是绘制阶段会把匹配区间向外扩到“词边界”，而中文没有空格，于是扩到了整句。现在只对拉丁字母/数字做词边界扩展，中文严格按所选文字绘制（解释内容本来就是对的）。
@@ -433,6 +441,10 @@ Select text, then use the floating button or the context menu to highlight **eve
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
 **Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
+## Changes in 1.1.10
+
+- SPA route changes are now event-driven with three fallbacks: the background worker forwards the new URL from `chrome.tabs.onUpdated`, the page keeps its `pushState`/`popstate`/`hashchange` listeners plus a 400 ms poll, and the popup's state query switches the route when it sees a URL mismatch. On a switch the old rows are cleared immediately, then the new route's annotations are restored once its text appears (up to ~6 s).
 
 ## Changes in 1.1.9
 

@@ -21,7 +21,7 @@ const {
 // console to confirm which build is actually running. If this line is missing
 // after a reload, Chrome is still serving a stale registration or an older
 // unpacked folder.
-const BUILD_VERSION = '1.1.9';
+const BUILD_VERSION = '1.1.10';
 console.info('[PageGloss] service worker ' + BUILD_VERSION + ' loaded (modules: shared.mjs)');
 
 const MENU_IDS = {
@@ -242,6 +242,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // SPA route changes (pushState) also surface here with the new URL, which is
+  // the reliable event the content script can react to.
+  if (changeInfo.url && /^(https?|file):/.test(changeInfo.url)) {
+    forwardToTab(tabId, { type: 'pg:urlChanged', url: changeInfo.url });
+  }
   if (changeInfo.status === 'complete') void queueMenuRebuild();
 });
 

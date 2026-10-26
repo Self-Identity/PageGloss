@@ -2096,6 +2096,18 @@
         sendResponse({ ok: true });
         return undefined;
       case 'pg:queryState':
+        // Catch-all: if a route change slipped past both the watcher and the
+        // background event, the popup's query still sees the live URL here.
+        var liveKey = S.normalizeUrlKey(location.href);
+        if (liveKey && liveKey !== state.urlKey) {
+          var staleSnapshot = stateSnapshot();
+          handleUrlChange(location.href);
+          staleSnapshot.urlKey = liveKey;
+          staleSnapshot.url = location.href;
+          staleSnapshot.annotations = [];
+          sendResponse(staleSnapshot);
+          return undefined;
+        }
         sendResponse(stateSnapshot());
         return undefined;
       case 'pg:removeAnnotation':
@@ -2116,6 +2128,11 @@
       case 'pg:settingsChanged':
         applySettings(message.settings);
         location.reload();
+        sendResponse({ ok: true });
+        return undefined;
+      case 'pg:urlChanged':
+        // Event-driven SPA route change from the background tab listener.
+        if (message.url) handleUrlChange(message.url);
         sendResponse({ ok: true });
         return undefined;
       case 'pg:enabledChanged':
@@ -2257,9 +2274,12 @@
    * The cached annotations belong to the previous URL, so drop the old marks
    * and load the new URL's own annotation set.
    */
-  function handleUrlChange() {
-    var nextKey = S.normalizeUrlKey(location.href);
-    if (!nextKey || nextKey === state.urlKey) return;
+  function handleUrlChange(urlOverride) {
+    var targetUrl = String(urlOverride || location.href);
+    var nextKey = S.normalizeUrlKey(targetUrl);
+    if (!nextKey) return;
+    urlWatcher.last = targetUrl;
+    if (nextKey === state.urlKey) return;
     // Persist the open thread against the page we are leaving.
     if (state.note) closeNote(true);
     window.clearTimeout(saveTimer);
@@ -2269,14 +2289,13 @@
     state.threads = {};
     state.note = null;
     state.urlKey = nextKey;
-    if (!state.settings || !state.settings.enabled) {
-      broadcastState();
-      return;
-    }
+    // Clear the previous route's rows in the popup right away.
+    broadcastState();
+    if (!state.settings || !state.settings.enabled) return;
     Store.getPage(nextKey).then(function (page) {
       if (state.urlKey !== nextKey) return; // a newer route change won
       state.page = page;
-      state.page.url = location.href;
+      state.page.url = targetUrl;
       state.page.title = document.title;
       restoreRouteWhenReady(0, nextKey);
     }).catch(function () {
@@ -2310,13 +2329,18 @@
     var map = null;
     try { map = M.buildTextMap(document.body); } catch (err) { map = null; }
     var ready = !!map && items.some(function (item) { return annotationTextExists(map, item); });
-    if (ready || tries >= 8) {
+    if (ready || tries >= 20) {
       try { M.unwrapAnnotations(null); } catch (err) { /* ignore */ }
-      restorePage({ soft: true });
+      try {
+        restorePage({ soft: true });
+      } catch (err) {
+        console.warn('[PageGloss] route restore failed:', err && err.message ? err.message : err);
+      }
       broadcastState();
       return;
     }
-    window.setTimeout(function () { restoreRouteWhenReady(tries + 1, expectedKey); }, 350);
+    // The SPA may render the new route well after the URL changes.
+    window.setTimeout(function () { restoreRouteWhenReady(tries + 1, expectedKey); }, 300);
   }
 
   function installUrlWatcher() {
@@ -2345,7 +2369,7 @@
         });
       }
     } catch (err) { /* frozen history: the periodic check still covers it */ }
-    if (typeof window.setInterval === 'function') window.setInterval(check, 1200);
+    if (typeof window.setInterval === 'function') window.setInterval(check, 400);
   }
 
   function boot() {

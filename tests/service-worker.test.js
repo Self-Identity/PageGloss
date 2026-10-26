@@ -21,7 +21,7 @@ const SW_PATH = path.join(ROOT, 'src', 'background', 'service-worker.js');
 
 function createChromeStub() {
   const storageData = new Map();
-  const listener = { onMessage: [], onConnect: [], onInstalled: [], onStartup: [], onCommand: [], onChanged: [] };
+  const listener = { onMessage: [], onConnect: [], onInstalled: [], onStartup: [], onCommand: [], onChanged: [], onUpdated: [] };
   const stub = {
     storageData,
     listeners: listener,
@@ -68,7 +68,7 @@ function createChromeStub() {
         stub.tabCreates.push(props);
         return { id: 99 };
       },
-      onUpdated: { addListener: () => {} }
+      onUpdated: { addListener: (fn) => listener.onUpdated.push(fn) }
     },
     permissions: {
       contains: async () => true,
@@ -1033,6 +1033,18 @@ async function main() {
     const port = startPort(chrome, EXPLAIN_PAYLOAD);
     await waitFor(() => port.messages.some((message) => message.type === 'done'));
     assert(system.indexOf('Always answer in English.') >= 0, 'English directive: ' + system.slice(-80));
+  });
+
+  await test('SPA url changes are forwarded to the content script', async () => {
+    const chrome = createChromeStub();
+    seed(chrome);
+    loadServiceWorker(chrome, async () => jsonResponse({}));
+    await waitFor(() => chrome.listeners.onUpdated.length > 0);
+    chrome.listeners.onUpdated[0](7, { url: 'https://example.com/next' });
+    await waitFor(() => chrome.tabMessages.some((item) => item.message.type === 'pg:urlChanged'));
+    const forwarded = chrome.tabMessages.filter((item) => item.message.type === 'pg:urlChanged').pop();
+    assertEqual(forwarded.tabId, 7, 'forwarded to the changed tab');
+    assertEqual(forwarded.message.url, 'https://example.com/next', 'new URL forwarded');
   });
 
   const failed = results.filter((item) => !item.ok);
