@@ -621,10 +621,12 @@
     el('notesPager').setAttribute('aria-label', t('popupMarks'));
     el('version').textContent = 'PageGloss v' + chrome.runtime.getManifest().version;
     var help = el('help');
-    help.textContent = t('optTitle');
-    var homepage = chrome.runtime.getManifest().homepage_url;
-    help.href = homepage || chrome.runtime.getURL('docs/help.html');
-    help.target = homepage ? '_blank' : '_self';
+    help.textContent = t('popupHelp');
+    // This used to point at homepage_url, so a link labelled "PageGloss 设置"
+    // opened GitHub. It now opens the bundled help page instead.
+    help.href = chrome.runtime.getURL('docs/help.html');
+    help.target = '_blank';
+    help.rel = 'noopener noreferrer';
   }
 
   function bind() {

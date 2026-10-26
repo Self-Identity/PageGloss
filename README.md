@@ -6,7 +6,16 @@
 - 零依赖原生 JS / CSS，无需构建，直接「加载已解压的扩展程序」
 - 全部数据只保存在本机浏览器，不经过任何第三方服务器
 
+**语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
 ---
+
+## 1.1.6 更新
+
+- **修复「PageGloss 设置」跳到 GitHub**：弹窗页脚那个链接文案原本是「PageGloss 设置」，但地址被写成了 `homepage_url`（GitHub）。现在改为「使用帮助」并打开扩展内置的 `docs/help.html`；`homepage_url` 同时修正为真实仓库地址。
+- **数据页按钮居中**：标注内容区域的按钮改为在格子内水平与垂直居中；多选模式为复选框预留的左侧间距仍做补偿，居中位置不变。
+- **设置页 GitHub 入口**：设置页右下角新增固定胶囊按钮「GitHub · Self-Identity」，点击在新标签页打开 `github.com/Self-Identity`。
+- **README 中英双语**：顶部提供语言跳转，中文文档之后新增完整英文版。
 
 ## 1.1.5 更新
 
@@ -390,3 +399,87 @@ src/shared/messages.js  →  src/shared/i18n.js  →  src/shared/storage.js
 - 只有你配置的接口地址会收到页面内容与 API Key
 - 扩展不采集任何遥测数据，不含远程脚本
 - 所有渲染都经过转义，模型返回的 Markdown 不会执行 HTML/脚本
+
+---
+
+# English
+
+PageGloss highlights every occurrence of the text you select, explains it with your own OpenAI-compatible LLM, and keeps a note and a chat thread next to each annotation.
+
+- Chrome / Edge, Manifest V3
+- Zero dependencies, plain JS/CSS, no build step: load the folder unpacked
+- All data stays in your browser; nothing goes anywhere except the endpoint you configure
+
+**Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
+## Changes in 1.1.6
+
+- The popup footer link labelled "PageGloss 设置" opened GitHub because it used `homepage_url`. It is now "Help" and opens the bundled `docs/help.html`; `homepage_url` points at the real repository.
+- Data page mark buttons are centred inside their cells (the selection checkbox inset is compensated in select mode).
+- The options page has a fixed GitHub chip in the bottom-right corner linking to `github.com/Self-Identity`.
+- This README is bilingual.
+
+## Install
+
+1. Clone or download this repository and, on Windows, run `deploy\deploy.bat` (double-click). On Linux/macOS run `bash deploy/deploy.sh`. The script checks the sources, runs the tests, builds `build/pagegloss-<version>.zip` and stages `build/pagegloss/`.
+2. Open `chrome://extensions` (or `edge://extensions`) and enable Developer mode.
+3. Choose "Load unpacked" and pick `build/pagegloss`.
+4. You can also load the repository root directly; it is a valid MV3 extension.
+
+## Configure your LLM
+
+Open the extension popup, then "LLM and interface settings":
+
+| Field | Notes |
+| --- | --- |
+| Endpoint | Paste the base URL from your provider's docs. It is stored exactly as typed and completed per request; the page shows the resulting URL. |
+| API key | Stored locally, sent only to the endpoint above. |
+| Model | Use "Fetch models" or type a model id (for example `deepseek-chat`). |
+| Temperature / max tokens | Defaults: `0.3` / `900`. |
+| Stream | On by default. |
+
+### Endpoint cheat sheet
+
+| Provider | Paste this |
+| --- | --- |
+| OpenAI | `https://api.openai.com/v1` |
+| DeepSeek | `https://api.deepseek.com` (also accepts `/v1`) |
+| Moonshot / Kimi | `https://api.moonshot.cn` |
+| Zhipu GLM | `https://open.bigmodel.cn` |
+| Alibaba DashScope | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Volcengine Ark | `https://ark.cn-beijing.volces.com/api/v3` |
+| Groq | `https://api.groq.com` |
+| Mistral / xAI / OpenRouter / Together / SiliconFlow / MiniMax | each provider's own base URL |
+| Gemini (OpenAI compatibility) | `https://generativelanguage.googleapis.com` |
+| Ollama / LM Studio | `http://localhost:11434/v1`, `http://localhost:1234/v1` |
+
+A full endpoint (`.../chat/completions`) is used verbatim; query strings survive path completion. Anthropic/Claude endpoints are detected and rejected with a clear message because they do not speak the OpenAI protocol. Rate limits (429/5xx) are retried once.
+
+## Usage
+
+- Select text, then right-click and choose "Mark and explain", press the shortcut (default `Alt+Q`), or click the floating button that appears 100px from the cursor.
+- Every occurrence on the page is highlighted with one consistent colour; the note card opens automatically.
+- Hover the card to read the explanation; the note pane slides out after 200 ms (immediately when the annotation already has a note).
+- Ask follow-up questions in the card; answers are stored with the annotation.
+- Pin the card to keep it open. Otherwise it closes on an outside click, on scroll (not while you are typing), or via the close button. A card opened right after marking stays until you click outside or close it.
+- Right-click an existing mark to remove that occurrence or all occurrences; "Clear every mark on this page" asks for confirmation first.
+- The data page (options → Data → View) lists everything grouped by site, with multi-select delete, JSON export/import, and a full-page reader for each annotation.
+
+## Privacy
+
+- Only the endpoint you configure receives page text and your API key.
+- No telemetry, no remote scripts.
+- Model output is rendered through an escape-first Markdown renderer; raw HTML is never executed.
+
+## Development
+
+```bash
+node tools/check.js        # static checks (manifest, i18n, layout rules, module boundaries)
+npm test                   # matcher, integration, service worker, ESM smoke, content load
+bash deploy/deploy.sh      # checks + tests + zip + staging
+```
+
+`dev/seed-demo.html` generates demo data for the data page; it is excluded from the release package.
+
+Repository: <https://github.com/Self-Identity/PageGloss>
+

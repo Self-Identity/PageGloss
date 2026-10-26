@@ -57,7 +57,7 @@ body {
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 18px 16px 40px;
+  padding: 18px 16px 64px;
   min-width: 0;
 }
 
@@ -548,4 +548,48 @@ textarea:focus {
   font-size: 10.5px;
   color: var(--pg-fg-dim);
   white-space: nowrap;
+}
+
+/* Fixed GitHub chip in the bottom-right corner of the options page. */
+.github-chip {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 32px);
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pg-fg-dim);
+  text-decoration: none;
+  white-space: nowrap;
+  background: var(--pg-surface);
+  border: 1px solid var(--pg-border);
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(16, 24, 40, .12);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.github-chip:hover,
+.github-chip:focus-visible {
+  color: var(--pg-fg);
+  border-color: var(--pg-accent-border);
+  background: var(--pg-hover);
+}
+
+.github-chip .icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+@media (max-width: 560px) {
+  .github-chip {
+    right: 10px;
+    bottom: 10px;
+  }
 }
