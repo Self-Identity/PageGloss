@@ -635,8 +635,8 @@ body:not(.select-mode) .check {
 .mark-hit {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: center;
   gap: 5px;
   width: 100%;
   min-width: 0;
@@ -650,7 +650,7 @@ body:not(.select-mode) .check {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.45;
-  text-align: start;
+  text-align: center;
   white-space: normal;
   cursor: pointer;
 }
@@ -672,11 +672,16 @@ body:not(.select-mode) .check {
   font-weight: 700;
   letter-spacing: .01em;
   color: var(--pg-fg);
+  text-align: center;
+  /* Cancel the asymmetric left padding reserved for the selection checkbox so
+     the text block is centred in the whole cell. */
+  padding-right: 18px;
 }
 
 .mark-foot {
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 6px;
   max-width: 100%;
