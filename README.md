@@ -8,6 +8,26 @@
 
 ---
 
+## 1.1.3 更新
+
+- **修复演示数据页无响应**：`dev/seed-demo.html` 的按钮逻辑原先写在内联 `<script>` 里，被 MV3 扩展页 CSP（`script-src 'self'`）拦截，点按钮没有任何反应。已拆分到外部 `dev/seed-demo.js`，现在可以正常写入与清空演示数据。
+- **官方接口地址直接粘贴即生效**：新增主流服务商的官方 base URL 规则，从文档复制后不用再手动补路径：
+  - OpenAI `https://api.openai.com/v1`
+  - DeepSeek `https://api.deepseek.com`（也支持 `/v1`）
+  - Moonshot / Kimi `https://api.moonshot.cn`（自动补 `/v1`）
+  - 智谱 `https://open.bigmodel.cn`（自动补 `/api/paas/v4`）
+  - 阿里云百炼 `https://dashscope.aliyuncs.com/compatible-mode/v1`
+  - 火山方舟 `https://ark.cn-beijing.volces.com/api/v3`
+  - Groq `https://api.groq.com`（自动补 `/openai/v1`）
+  - Mistral、xAI、OpenRouter、Together、SiliconFlow、MiniMax、本地 Ollama / LM Studio
+  - Gemini 的 OpenAI 兼容入口 `https://generativelanguage.googleapis.com`（自动补 `/v1beta/openai`）
+- **粘贴内容自动清洗**：自动去掉首尾引号/反引号、所有空白与末尾斜杠；URL 中的查询参数（例如 Azure 的 `api-version`）在追加路径后仍保留。
+- **不兼容协议提前提示**：粘贴 Anthropic / Claude 地址时，设置页会直接说明它不使用 OpenAI 协议，避免得到一个看不懂的 404。
+- **限流与网关错误自动重试一次**：遇到 429 / 500 / 502 / 503 / 504 时在同一端点重试一次（优先遵循 `Retry-After`，最多等 2 秒）；重试仍失败则报告真实状态码，不再误报成「接口地址不对」。
+- **其它**：`obsidian-test/` 已加入 `.gitignore`，为后续 Obsidian 对接预留，本轮不实现。
+
+---
+
 ## 1.1.2 更新
 
 - **多选改为模式切换**：点「多选」才显示复选框；勾选站点会自动勾选其全部页面与标记，子项全选后父项自动勾选并支持半选状态；退出多选会清空选择。

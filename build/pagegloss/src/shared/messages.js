@@ -86,17 +86,72 @@
   function normalizeInputUrl(value) {
     var url = String(value || '').trim();
     if (!url) return '';
+    // Pasted from docs: drop wrapping quotes/backticks and all whitespace.
+    url = url.replace(/^[\s"'`“”‘’]+|[\s"'`“”‘’]+$/g, '');
     url = url.replace(/\s+/g, '');
     url = url.replace(/\/+$/, '');
     return url;
   }
 
   /**
+   * Official base paths for providers that do not use a bare /v1 segment.
+   * Values are appended to the pasted origin; '' means the provider serves the
+   * OpenAI routes directly at the origin.
+   */
+  var PROVIDER_PATHS = [
+    { host: /(^|\.)api\.deepseek\.com$/i, chat: '', models: '' },
+    { host: /(^|\.)api\.moonshot\.(cn|ai)$/i, chat: '/v1', models: '/v1' },
+    { host: /(^|\.)open\.bigmodel\.cn$/i, chat: '/api/paas/v4', models: '/api/paas/v4' },
+    { host: /(^|\.)dashscope(-intl)?\.aliyuncs\.com$/i, chat: '/compatible-mode/v1', models: '/compatible-mode/v1' },
+    { host: /(^|\.)ark\.(cn-beijing|cn-shanghai|ap-southeast)\.volces\.com$/i, chat: '/api/v3', models: '/api/v3' },
+    { host: /(^|\.)api\.groq\.com$/i, chat: '/openai/v1', models: '/openai/v1' },
+    { host: /(^|\.)api\.mistral\.ai$/i, chat: '/v1', models: '/v1' },
+    { host: /(^|\.)api\.x\.ai$/i, chat: '/v1', models: '/v1' },
+    { host: /(^|\.)openrouter\.ai$/i, chat: '/api/v1', models: '/api/v1' },
+    { host: /(^|\.)api\.together\.xyz$/i, chat: '/v1', models: '/v1' },
+    { host: /(^|\.)api\.siliconflow\.(cn|com)$/i, chat: '/v1', models: '/v1' },
+    { host: /(^|\.)api\.minimax\.(chat|io)$/i, chat: '/v1', models: '/v1' },
+    { host: /(^|\.)generativelanguage\.googleapis\.com$/i, chat: '/v1beta/openai', models: '/v1beta/openai' },
+    { host: /^(localhost|127\.0\.0\.1)$/i, chat: '/v1', models: '/v1' }
+  ];
+
+  function providerPathFor(hostname) {
+    var host = String(hostname || '');
+    for (var i = 0; i < PROVIDER_PATHS.length; i++) {
+      if (PROVIDER_PATHS[i].host.test(host)) return PROVIDER_PATHS[i];
+    }
+    return null;
+  }
+
+  /** Append a path segment before any query string (Azure keeps api-version). */
+  function withPath(input, suffix) {
+    if (!suffix) return input;
+    try {
+      var url = new URL(input);
+      url.pathname = url.pathname.replace(/\/+$/, '') + suffix;
+      return url.toString();
+    } catch (err) {
+      return input + suffix;
+    }
+  }
+
+  /** Anthropic speaks its own protocol; an OpenAI-style request cannot work. */
+  function isAnthropicUrl(value) {
+    try {
+      var host = new URL(normalizeInputUrl(value)).hostname;
+      return /(^|\.)anthropic\.com$/i.test(host) || /(^|\.)claude\.ai$/i.test(host);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
    * Chat completion candidates for a user supplied address, most likely first.
    *
-   * A bare origin is ambiguous: OpenAI needs /v1/chat/completions while DeepSeek
-   * 404s there (it serves /chat/completions directly), so both are offered and
-   * the caller falls back on 404. The typed value is never rewritten.
+   * Official base URLs from provider docs can be pasted as-is: known hosts get
+   * their documented prefix (Moonshot /v1, Zhipu /api/paas/v4, ...), a path the
+   * user already typed is respected, and a bare unknown origin tries /v1 first
+   * then the prefix-less form (DeepSeek). Query strings survive the append.
    */
   function chatEndpointCandidates(value) {
     var input = normalizeInputUrl(value);
@@ -105,12 +160,8 @@
       if (url && out.indexOf(url) < 0) out.push(url);
     }
     if (!input) return out;
-    if (/\/chat\/completions$/.test(input) || /\/completions$/.test(input)) {
+    if (/\/(chat\/)?completions$/.test(input)) {
       push(input);
-      return out;
-    }
-    if (/\/v\d+$/.test(input)) {
-      push(input + '/chat/completions');
       return out;
     }
     var parsed = null;
@@ -121,12 +172,19 @@
       return out;
     }
     var path = parsed.pathname.replace(/\/+$/, '');
-    if (!path) {
-      push(parsed.origin + '/v1/chat/completions');
-      push(parsed.origin + '/chat/completions');
+    if (path) {
+      // An explicit prefix was pasted (…/v1, …/compatible-mode/v1, …): trust it.
+      push(withPath(input, '/chat/completions'));
       return out;
     }
-    push(input + '/chat/completions');
+    var entry = providerPathFor(parsed.hostname);
+    if (entry) {
+      push(withPath(input, (entry.chat || '') + '/chat/completions'));
+      push(withPath(input, '/v1/chat/completions'));
+      return out;
+    }
+    push(withPath(input, '/v1/chat/completions'));
+    push(withPath(input, '/chat/completions'));
     return out;
   }
 
@@ -141,35 +199,29 @@
       if (url && out.indexOf(url) < 0) out.push(url);
     }
     if (!input) return out;
-
-    var base = null;
+    var parsed = null;
     try {
-      base = new URL(input);
+      parsed = new URL(input);
     } catch (err) {
       return out;
     }
-    var path = base.pathname.replace(/\/+$/, '');
-    var origin = base.origin;
-
+    var path = parsed.pathname.replace(/\/+$/, '');
     if (/\/chat\/completions$/.test(path)) {
-      // Explicit chat endpoint: the list sits next to it.
-      push(origin + path.slice(0, path.length - '/chat/completions'.length) + '/models');
-      push(origin + '/models');
+      push(withPath(input.replace(/\/chat\/completions$/, ''), '/models'));
+      // Unknown hosts sometimes keep the list next to the origin instead.
+      try {
+        push(new URL(input).origin + '/models');
+      } catch (err) { /* keep the sibling candidate */ }
       return out;
     }
-    if (/\/v\d+$/.test(path)) {
-      push(origin + path + '/models');
-      push(origin + path.replace(/\/v\d+$/, '') + '/models');
+    if (path) {
+      push(withPath(input, '/models'));
       return out;
     }
-    if (path && path !== '/') {
-      push(origin + path + '/models');
-      push(origin + path + '/v1/models');
-      return out;
-    }
-    // Bare origin: OpenAI style first, then DeepSeek style.
-    push(origin + '/v1/models');
-    push(origin + '/models');
+    var entry = providerPathFor(parsed.hostname);
+    if (entry) push(withPath(input, (entry.models || '') + '/models'));
+    push(withPath(input, '/v1/models'));
+    push(withPath(input, '/models'));
     return out;
   }
 
@@ -328,6 +380,7 @@
     uuid: uuid,
     isWordLikeNeedle: isWordLikeNeedle,
     siteGroupOf: siteGroupOf,
+    isAnthropicUrl: isAnthropicUrl,
     apiErrorKey: apiErrorKey
   };
 })();

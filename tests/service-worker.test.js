@@ -700,9 +700,9 @@ async function main() {
     await waitFor(() => chrome.listeners.onConnect.length > 0);
     const port = startPort(chrome, EXPLAIN_PAYLOAD);
     await waitFor(() => port.messages.some((message) => message.type === 'done'));
-    assertEqual(requested[0], 'https://api.deepseek.com/v1/chat/completions', 'the /v1 candidate is tried first');
-    assertEqual(requested[1], 'https://api.deepseek.com/chat/completions', 'the 404 falls back to the direct path');
-    assert(port.messages.some((message) => message.type === 'done'), 'the fallback produced an answer');
+    assertEqual(requested[0], 'https://api.deepseek.com/chat/completions', 'DeepSeek serves the direct path first');
+    assertEqual(requested.length, 1, 'the documented DeepSeek endpoint needs no 404 round trip');
+    assert(port.messages.some((message) => message.type === 'done'), 'the request produced an answer');
     assertEqual(
       chrome.storageData.get('pg:settings').apiBaseUrl,
       'https://api.deepseek.com',
@@ -886,6 +886,136 @@ async function main() {
     });
     assertEqual(response.ok, false, 'no tab is created for an empty request');
     assertEqual(chrome.tabCreates.length, 0, 'tabs.create was not called');
+  });
+
+  await test('official provider base URLs resolve to the documented chat endpoint', async () => {
+    // Load the shared helpers on their own, exactly like the options page does.
+    const context = vm.createContext({ URL, console });
+    context.globalThis = context;
+    context.window = context;
+    vm.runInContext(fs.readFileSync(path.join(ROOT, 'src/shared/messages.js'), 'utf8'), context, { filename: 'messages.js' });
+    const S = context.PageGlossShared;
+    assert(S && typeof S.chatEndpointCandidates === 'function', 'shared helpers exported');
+
+    const cases = [
+      ['https://api.openai.com/v1', 'https://api.openai.com/v1/chat/completions'],
+      ['https://api.openai.com/v1/', 'https://api.openai.com/v1/chat/completions'],
+      ['  "https://api.deepseek.com"  ', 'https://api.deepseek.com/chat/completions'],
+      ['https://api.deepseek.com/v1', 'https://api.deepseek.com/v1/chat/completions'],
+      ['https://api.deepseek.com/v1/chat/completions', 'https://api.deepseek.com/v1/chat/completions'],
+      ['https://api.moonshot.cn', 'https://api.moonshot.cn/v1/chat/completions'],
+      ['https://api.moonshot.cn/v1', 'https://api.moonshot.cn/v1/chat/completions'],
+      ['https://open.bigmodel.cn', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'],
+      ['https://open.bigmodel.cn/api/paas/v4', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'],
+      ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'],
+      ['https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions'],
+      ['https://ark.cn-beijing.volces.com/api/v3', 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'],
+      ['https://api.groq.com', 'https://api.groq.com/openai/v1/chat/completions'],
+      ['https://api.groq.com/openai/v1', 'https://api.groq.com/openai/v1/chat/completions'],
+      ['https://api.mistral.ai/v1', 'https://api.mistral.ai/v1/chat/completions'],
+      ['https://api.x.ai/v1', 'https://api.x.ai/v1/chat/completions'],
+      ['https://openrouter.ai/api/v1', 'https://openrouter.ai/api/v1/chat/completions'],
+      ['https://api.together.xyz/v1', 'https://api.together.xyz/v1/chat/completions'],
+      ['https://api.siliconflow.cn/v1', 'https://api.siliconflow.cn/v1/chat/completions'],
+      ['https://generativelanguage.googleapis.com', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'],
+      ['https://generativelanguage.googleapis.com/v1beta/openai', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'],
+      ['http://localhost:11434', 'http://localhost:11434/v1/chat/completions'],
+      ['http://localhost:11434/v1', 'http://localhost:11434/v1/chat/completions']
+    ];
+    for (const [input, expected] of cases) {
+      const candidates = S.chatEndpointCandidates(input);
+      assertEqual(candidates[0], expected, 'input: ' + input);
+    }
+
+    // The query string of an Azure style URL survives the path append.
+    const azure = S.chatEndpointCandidates('https://x.openai.azure.com/openai/deployments/d?api-version=2024-06-01');
+    assertEqual(
+      azure[0],
+      'https://x.openai.azure.com/openai/deployments/d/chat/completions?api-version=2024-06-01',
+      'query preserved: ' + azure[0]
+    );
+
+    // Anthropic is flagged instead of being sent an OpenAI request.
+    assertEqual(S.isAnthropicUrl('https://api.anthropic.com'), true, 'anthropic detected');
+    assertEqual(S.isAnthropicUrl('https://api.openai.com/v1'), false, 'openai not flagged');
+
+    // The model list follows the same provider prefixes.
+    assertEqual(S.modelsEndpointCandidates('https://open.bigmodel.cn')[0], 'https://open.bigmodel.cn/api/paas/v4/models', 'zhipu models');
+    assertEqual(S.modelsEndpointCandidates('https://api.deepseek.com')[0], 'https://api.deepseek.com/models', 'deepseek models');
+    assertEqual(S.modelsEndpointCandidates('https://api.openai.com/v1')[0], 'https://api.openai.com/v1/models', 'openai models');
+  });
+
+  await test('a pasted official base URL is used verbatim by the request pipeline', async () => {
+    const cases = [
+      ['https://api.openai.com/v1', 'https://api.openai.com/v1/chat/completions'],
+      ['https://api.moonshot.cn', 'https://api.moonshot.cn/v1/chat/completions'],
+      ['https://open.bigmodel.cn', 'https://open.bigmodel.cn/api/paas/v4/chat/completions']
+    ];
+    for (const [input, expected] of cases) {
+      const chrome = createChromeStub();
+      seed(chrome, { apiBaseUrl: input });
+      const requested = [];
+      loadServiceWorker(chrome, async (url) => {
+        requested.push(url);
+        return sseResponse([sseChunk('答案正确'), 'data: [DONE]\n\n']);
+      });
+      await waitFor(() => chrome.listeners.onConnect.length > 0);
+      const port = startPort(chrome, EXPLAIN_PAYLOAD);
+      await waitFor(() => port.messages.some((message) => message.type === 'done'));
+      const done = port.messages.find((message) => message.type === 'done');
+      assertEqual(requested[0], expected, 'request URL for ' + input);
+      assertEqual(done.text, '答案正确', 'text extracted for ' + input);
+    }
+  });
+
+  await test('a rate limit is retried once before failing', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { apiBaseUrl: 'https://api.openai.com/v1' });
+    let calls = 0;
+    loadServiceWorker(chrome, async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { get: () => '0' },
+          body: null,
+          json: async () => ({}),
+          text: async () => 'rate limited'
+        };
+      }
+      return sseResponse([sseChunk('重试成功'), 'data: [DONE]\n\n']);
+    });
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'done'), 5000);
+    const done = port.messages.find((message) => message.type === 'done');
+    assertEqual(done.text, '重试成功', 'the retried request produced the answer');
+    assertEqual(calls, 2, 'exactly one retry');
+  });
+
+  await test('a persistent server error is reported instead of endpoint-not-found', async () => {
+    const chrome = createChromeStub();
+    seed(chrome, { apiBaseUrl: 'https://api.openai.com/v1' });
+    let calls = 0;
+    loadServiceWorker(chrome, async () => {
+      calls += 1;
+      return {
+        ok: false,
+        status: 503,
+        headers: { get: () => '0' },
+        body: null,
+        json: async () => ({}),
+        text: async () => 'upstream down'
+      };
+    });
+    await waitFor(() => chrome.listeners.onConnect.length > 0);
+    const port = startPort(chrome, EXPLAIN_PAYLOAD);
+    await waitFor(() => port.messages.some((message) => message.type === 'error'), 5000);
+    const error = port.messages.find((message) => message.type === 'error');
+    assertEqual(error.code, 'http', 'http error code');
+    assertEqual(error.status, 503, 'real status preserved');
+    assertEqual(calls, 2, 'one retry was made');
   });
 
   const failed = results.filter((item) => !item.ok);

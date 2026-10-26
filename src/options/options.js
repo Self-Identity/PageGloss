@@ -129,6 +129,10 @@
       return;
     }
     node.hidden = false;
+    if (S.isAnthropicUrl(raw)) {
+      node.textContent = t('optUnsupportedProvider');
+      return;
+    }
     const candidates = S.chatEndpointCandidates(raw);
     node.textContent = t('optResolvedEndpoint', { s: candidates[0] || '' }) +
       (candidates.length > 1 ? '\n' + t('optResolvedFallback', { s: candidates[1] }) : '');

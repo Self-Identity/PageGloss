@@ -56,6 +56,7 @@ export const cssEscape = shared.cssEscape;
 export const uuid = shared.uuid;
 export const isWordLikeNeedle = shared.isWordLikeNeedle;
 export const siteGroupOf = shared.siteGroupOf;
+export const isAnthropicUrl = shared.isAnthropicUrl;
 export const apiErrorKey = shared.apiErrorKey;
 
 export const get = store.get;

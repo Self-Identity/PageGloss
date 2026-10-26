@@ -21,7 +21,7 @@ const {
 // console to confirm which build is actually running. If this line is missing
 // after a reload, Chrome is still serving a stale registration or an older
 // unpacked folder.
-const BUILD_VERSION = '1.1.2';
+const BUILD_VERSION = '1.1.3';
 console.info('[PageGloss] service worker ' + BUILD_VERSION + ' loaded (modules: shared.mjs)');
 
 const MENU_IDS = {
@@ -380,7 +380,22 @@ async function performRequest(settings, payload, onToken, signal, onReasoning) {
   const attempts = [];
   let result = null;
   for (const endpoint of candidates) {
-    result = await requestOnce(settings, payload, onToken, signal, endpoint, onReasoning);
+    // A 429/5xx before any byte arrived is worth one short retry on the same
+    // endpoint; a 404 means the path itself is wrong, so move on.
+    for (let transient = 0; ; transient++) {
+      result = await requestOnce(settings, payload, onToken, signal, endpoint, onReasoning);
+      if (result.retryable && result.retryKind === 'transient' && transient < 1) {
+        const wait = Math.min(Number(result.retryAfter) || 600, 2000);
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        continue;
+      }
+      break;
+    }
+    if (result.retryable && result.retryKind === 'transient') {
+      // The retry also failed: report the real status instead of "endpoint not
+      // found", which would point the user at the wrong problem.
+      return { error: classifyHttpError(result.status || 503, result.detail || ''), attempts };
+    }
     if (result.retryable) {
       attempts.push({ url: endpoint, status: 404 });
       continue;
@@ -450,7 +465,20 @@ async function requestOnce(settings, payload, onToken, signal, endpoint, onReaso
     const text = await response.text().catch(() => '');
     // A 404 means this candidate path is wrong for this provider: let the caller
     // try the next one instead of failing the whole request.
-    if (response.status === 404) return { retryable: true };
+    if (response.status === 404) return { retryable: true, retryKind: 'endpoint' };
+    // Rate limits and gateway hiccups: retry once on the same endpoint.
+    if (response.status === 429 || response.status === 500 || response.status === 502 ||
+      response.status === 503 || response.status === 504) {
+      const header = response.headers && typeof response.headers.get === 'function'
+        ? Number(response.headers.get('retry-after')) : 0;
+      return {
+        retryable: true,
+        retryKind: 'transient',
+        status: response.status,
+        detail: text,
+        retryAfter: header > 0 ? header * 1000 : 0
+      };
+    }
     return { error: classifyHttpError(response.status, text) };
   }
 
