@@ -611,6 +611,40 @@ async function main() {
     );
   });
 
+  await test('a route URL variant finds the stored annotations', async () => {
+    const env = loadContentScriptStack(manifestFiles, {
+      storage: {
+        'pg:page:https://example.com/target/': {
+          url: 'https://example.com/target/',
+          urlKey: 'https://example.com/target/',
+          title: 'Target',
+          updatedAt: Date.now(),
+          annotations: [{
+            id: 'route-1',
+            text: 'PageGloss content load test.',
+            color: '#fff2a8',
+            anchors: [],
+            marks: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          }],
+          chats: {}
+        }
+      }
+    });
+    await waitFor(() => env.sandbox.window.__pagegloss && env.sandbox.window.__pagegloss.state.settings);
+    await waitFor(() => env.chrome.__messageListeners.length > 0);
+    env.chrome.__messageListeners.forEach((listener) => {
+      listener({ type: 'pg:urlChanged', url: 'https://example.com/target' }, {}, () => {});
+    });
+    await waitFor(() => env.sandbox.window.__pagegloss.state.annotations.length === 1, 4000);
+    assertEqual(
+      env.sandbox.window.__pagegloss.state.urlKey,
+      'https://example.com/target/',
+      'the stored trailing-slash key is adopted'
+    );
+  });
+
   const failed = results.filter((item) => !item.ok);
   results.forEach((item) => {
     console.log('[' + (item.ok ? 'PASS' : 'FAIL') + '] ' + item.name);

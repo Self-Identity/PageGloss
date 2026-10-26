@@ -21,7 +21,7 @@ const {
 // console to confirm which build is actually running. If this line is missing
 // after a reload, Chrome is still serving a stale registration or an older
 // unpacked folder.
-const BUILD_VERSION = '1.1.11';
+const BUILD_VERSION = '1.1.12';
 console.info('[PageGloss] service worker ' + BUILD_VERSION + ' loaded (modules: shared.mjs)');
 
 const MENU_IDS = {

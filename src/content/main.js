@@ -2269,6 +2269,60 @@
 
   var urlWatcher = { installed: false, last: '' };
 
+  /** URL keys that may hold the same logical page (slash/query variants). */
+  function urlKeyVariants(url) {
+    var key = S.normalizeUrlKey(url);
+    var out = [];
+    function push(value) {
+      if (value && out.indexOf(value) < 0) out.push(value);
+    }
+    push(key);
+    try {
+      var parsed = new URL(url);
+      var path = parsed.pathname;
+      if (path.length > 1 && /\/+$/.test(path)) {
+        var trimmed = new URL(url);
+        trimmed.pathname = path.replace(/\/+$/, '');
+        push(S.normalizeUrlKey(trimmed.toString()));
+      } else if (path && path !== '/') {
+        var slashed = new URL(url);
+        slashed.pathname = path + '/';
+        push(S.normalizeUrlKey(slashed.toString()));
+      }
+    } catch (err) { /* keep the plain key */ }
+    var noQuery = key.split('?')[0];
+    push(noQuery);
+    push(noQuery + '/');
+    return out;
+  }
+
+  /**
+   * SPA frameworks often produce a URL that differs from the redirected URL the
+   * annotations were stored under (trailing slash, leftover query). Try the
+   * variants and adopt the key that actually holds annotations.
+   */
+  function loadPageForUrl(url) {
+    var keys = urlKeyVariants(url);
+    var chain = Promise.resolve(null);
+    keys.forEach(function (key) {
+      chain = chain.then(function (found) {
+        if (found) return found;
+        return Store.getPage(key).then(function (page) {
+          if (page && Array.isArray(page.annotations) && page.annotations.length) {
+            return { key: key, page: page };
+          }
+          return null;
+        }).catch(function () { return null; });
+      });
+    });
+    return chain.then(function (found) {
+      if (found) return found;
+      return Store.getPage(keys[0] || S.normalizeUrlKey(url)).then(function (page) {
+        return { key: keys[0] || S.normalizeUrlKey(url), page: page };
+      });
+    });
+  }
+
   /**
    * A history API navigation changes the URL without reloading the document.
    * The cached annotations belong to the previous URL, so drop the old marks
@@ -2288,7 +2342,13 @@
     var nextKey = S.normalizeUrlKey(targetUrl);
     if (!nextKey) return;
     urlWatcher.last = targetUrl;
-    if (nextKey === state.urlKey) return;
+    if (nextKey === state.urlKey) {
+      // Same key: only skip when the page was actually loaded. An earlier
+      // attempt may have failed (empty page), and a later signal must retry.
+      var loaded = !!(state.page && state.page.urlKey === state.urlKey &&
+        (state.page.annotations.length || state.annotations.length));
+      if (loaded) return;
+    }
     // Persist the open thread against the page we are leaving.
     if (state.note) closeNote(true);
     window.clearTimeout(saveTimer);
@@ -2301,12 +2361,21 @@
     // Clear the previous route's rows in the popup right away.
     broadcastState();
     if (!state.settings || !state.settings.enabled) return;
-    Store.getPage(nextKey).then(function (page) {
+    loadPageForUrl(targetUrl).then(function (found) {
       if (state.urlKey !== nextKey) return; // a newer route change won
-      state.page = page;
+      if (!found || !found.page) {
+        broadcastState();
+        return;
+      }
+      if (found.key !== nextKey) {
+        // The annotations live under a slash/query variant of this URL.
+        console.info('[PageGloss] route key', nextKey, '->', found.key);
+        state.urlKey = found.key;
+      }
+      state.page = found.page;
       state.page.url = targetUrl;
       state.page.title = document.title;
-      restoreRouteWhenReady(0, nextKey);
+      restoreRouteWhenReady(0, state.urlKey);
     }).catch(function () {
       broadcastState();
     });
@@ -2332,6 +2401,7 @@
     var tries = attempt || 0;
     var items = (state.page && state.page.annotations) || [];
     if (!items.length) {
+      console.info('[PageGloss] route has no cached annotations:', state.urlKey);
       broadcastState();
       return;
     }
@@ -2400,9 +2470,10 @@
           t = i18n.t;
         }
         if (!settings.enabled) return settings;
-        return Store.getPage(state.urlKey)
-          .then(function (page) {
-            state.page = page;
+        return loadPageForUrl(location.href)
+          .then(function (found) {
+            if (found && found.key && found.key !== state.urlKey) state.urlKey = found.key;
+            state.page = (found && found.page) || { url: location.href, urlKey: state.urlKey, title: document.title, annotations: [], chats: {} };
             state.page.url = location.href;
             state.page.title = document.title;
             restorePage();

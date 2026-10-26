@@ -9,6 +9,12 @@
 
 **语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
 
+## 1.1.12 更新
+
+- **修复「无标注页 → 有标注页」切路由后不显示**：SPA 给的 URL 常与服务端重定向后的 URL 不完全一样（少/多一个结尾 `/`、残留查询参数），而标注是按后者存储的，于是按前者取到的是空页面。现在会依次尝试「原 URL、加/去结尾斜杠、去掉查询参数」等变体，命中哪个就用哪个的 key；同时把「同 key 但上次没加载到内容」的情况允许重试。
+- 增加诊断日志：`[PageGloss] route key A -> B`（命中变体）、`[PageGloss] route has no cached annotations: …`（确实没有缓存）、`[PageGloss] route restore failed: …`（恢复异常），方便你下次直接贴控制台。
+- 新增回归测试：存储里是带结尾斜杠的 key、路由切换给的是无斜杠 URL 时，必须能取到并恢复标注。
+
 ## 1.1.11 更新
 
 - **修复 SPA 路由处理崩溃**：`handleUrlChange` 里引用了一个不存在的变量 `noteSaveTimer`，一进入就抛 `ReferenceError`，导致路由切换完全没执行——这才是上一轮「切 path 后仍不更新」的直接原因。已改为正确的 `pageSaveTimer`，并给整个路由处理套上异常捕获，出错只会写一条 `[PageGloss] route change failed` 警告，不会再中断轮询。
@@ -446,6 +452,12 @@ Select text, then use the floating button or the context menu to highlight **eve
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
 **Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
+## Changes in 1.1.12
+
+- Fixed "unannotated page → annotated page" after an SPA route change: the URL the router reports often differs from the redirected URL the annotations were stored under (trailing slash, leftover query), so the lookup found an empty page. The loader now tries the plain URL, with/without a trailing slash, and without the query string, and adopts whichever key actually holds annotations. A same-key route that previously failed to load is retried.
+- Added diagnostics: `[PageGloss] route key A -> B`, `[PageGloss] route has no cached annotations: …`, `[PageGloss] route restore failed: …`.
+- Added a regression test where storage holds the trailing-slash key while the route reports the un-slashed URL.
 
 ## Changes in 1.1.11
 
