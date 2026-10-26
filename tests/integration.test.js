@@ -343,6 +343,15 @@ function queryAll(root, selector) {
 
 /** Build the canned body markup. kind: 'words' for the word-boundary fixture. */
 function parseBody(document, kind) {
+  if (kind === 'zh2') {
+    const zh2Root = new Element('div');
+    zh2Root.setAttribute('id', 'pg-root');
+    const zh2Paragraph = new Element('p');
+    zh2Paragraph.setAttribute('id', 'pg-zh2');
+    zh2Paragraph.appendChild(new TextNode('但因为不同模型的分词不同，所以换算比例也存在差异，每一次实际处理'));
+    zh2Root.appendChild(zh2Paragraph);
+    return zh2Root;
+  }
   if (kind === 'zh') {
     const zhRoot = new Element('div');
     zhRoot.setAttribute('id', 'pg-root');
@@ -1070,9 +1079,22 @@ async function main() {
     await waitFor(() => env.sandbox.window.__pagegloss.state.annotations.length === 1);
     const marks = marksIn(env.document);
     assertEqual(marks.length, 1, 'only the selected phrase matches once');
-    // The DOM stub wraps whole text nodes, so assert the recorded needle instead
-    // of the mark text: token expansion would have produced extra marks.
+    assertEqual(marks[0].textContent, '目标句子，', 'the wrapped text is exactly the selection');
     assertEqual(env.sandbox.window.__pagegloss.state.annotations[0].text, '目标句子，', 'the annotation keeps the selection');
+  });
+
+  await test('a two-character Chinese word is not widened to its sentence', async () => {
+    const env = bootContent('zh2');
+    await waitFor(() => env.sandbox.window.__pagegloss.state.settings);
+    env.sandbox.window.__pagegloss.mark({
+      text: '差异',
+      anchorElement: env.document.body.childNodes[0].childNodes[0].childNodes[0],
+      sentence: '但因为不同模型的分词不同，所以换算比例也存在差异，每一次实际处理'
+    });
+    await waitFor(() => env.sandbox.window.__pagegloss.state.annotations.length === 1);
+    const marks = marksIn(env.document);
+    assertEqual(marks.length, 1, 'one occurrence');
+    assertEqual(marks[0].textContent, '差异', 'only the two characters are wrapped');
   });
 
   const failed = results.filter((item) => !item.ok);

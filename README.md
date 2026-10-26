@@ -9,6 +9,11 @@
 
 **语言 / Language:** [中文](#pagegloss-划词解释) · [English](#english)
 
+## 1.1.9 更新
+
+- **修中文短词被扩成整句**：标记「差异」二字时，实际标出了「…所以换算比例也存在差异…」整段。根因是绘制阶段会把匹配区间向外扩到“词边界”，而中文没有空格，于是扩到了整句。现在只对拉丁字母/数字做词边界扩展，中文严格按所选文字绘制（解释内容本来就是对的）。
+- **SPA 切换 path 后弹窗列表同步**：内容脚本广播新 URL 时，弹窗会先采用广播里的 URL（`pushState` 不会触发 tabs 事件，弹窗缓存的 URL 还是旧的），再按新 URL 刷新；列表不再停留在旧页面，统计与列表保持一致。
+
 ## 1.1.8 更新
 
 - **中文标记只标所选内容**：句子级“逐词标记”此前对中文也会生效，导致整句被标。现在该功能只对空格分词的文本（英文等）启用，中文只标你选中的部分。
@@ -428,6 +433,11 @@ Select text, then use the floating button or the context menu to highlight **eve
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
 **Language:** [中文](#pagegloss-划词解释) · [English](#english)
+
+## Changes in 1.1.9
+
+- Fixed a short Chinese word being highlighted as its whole sentence: the paint step used to extend a match to word boundaries, and CJK has no spaces. Only Latin/digit word characters are extended now; CJK is painted exactly as selected.
+- The popup list now follows SPA route changes: it adopts the URL broadcast by the content script (pushState fires no tabs event) before refreshing, so the count and the rows stay in sync.
 
 ## Changes in 1.1.6
 

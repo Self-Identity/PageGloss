@@ -630,14 +630,22 @@
   }
 
   function bind() {
-    // The content script broadcasts after a SPA route change; re-query so the
-    // annotation list follows the new URL even without a page reload.
+    // The content script broadcasts after a SPA route change. The popup's cached
+    // tab URL can still be the old one (pushState fires no tabs event), so adopt
+    // the URL from the message before refreshing.
     if (chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener(function (message) {
         if (!message || message.type !== 'pg:stateChanged') return;
-        var key = message.urlKey || '';
-        if (key && key !== S.normalizeUrlKey(tabUrl())) return;
-        refreshPageState();
+        if (state.tab && message.url) state.tab.url = String(message.url);
+        if (Array.isArray(message.annotations)) {
+          state.annotations = dedupeAnnotations(message.annotations);
+          state.annotationsUrl = message.url || tabUrl();
+          state.pageState = { url: state.annotationsUrl, annotations: state.annotations };
+          state.loaded = true;
+          state.notesSignature = '';
+          renderNotes(true);
+        }
+        refreshPageState().catch(function () { /* the status line reports it */ });
       });
     }
 

@@ -437,27 +437,35 @@
       }
     }
     if (firstReal < 0) return { nodeIndex: -1, start: 0, end: 0 };
+    var first = chars[firstReal];
+    var last = chars[lastReal];
+    // Only Latin/digit word characters are extended to a whole word. CJK has no
+    // spaces, so extending there swallowed the entire sentence around a match.
     var from = firstReal;
     while (from > 0) {
       var prev = chars[from - 1];
-      if (!prev || prev.n < 0 || SPACE_CHARS.test(prev.c)) break;
+      if (!prev || prev.n < 0 || !isWordChar(prev.c)) break;
       from--;
     }
     var to = lastReal;
     while (to < chars.length - 1) {
       var next = chars[to + 1];
-      if (!next || next.n < 0 || SPACE_CHARS.test(next.c)) break;
+      if (!next || next.n < 0 || !isWordChar(next.c)) break;
       to++;
     }
-    var first = chars[from];
-    var last = chars[to];
-    if (!first || !last || first.n !== last.n) {
+    if (!isWordChar(first.c)) {
+      from = firstReal;
+      to = lastReal;
+    }
+    var firstChar = chars[from];
+    var lastChar = chars[to];
+    if (!firstChar || !lastChar || firstChar.n !== lastChar.n) {
       // The word really does span several nodes; fall back to the raw match so
       // every node still receives a mark fragment.
       var fallbackFirst = chars[firstReal];
       return { nodeIndex: fallbackFirst.n, start: fallbackFirst.o, end: chars[lastReal].o + 1, partial: true };
     }
-    return { nodeIndex: first.n, start: first.o, end: last.o + 1 };
+    return { nodeIndex: firstChar.n, start: firstChar.o, end: lastChar.o + 1 };
   }
 
   function unwrapMark(mark) {
