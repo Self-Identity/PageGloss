@@ -337,6 +337,9 @@
       const settings = await Store.getSettings();
       I = window.PageGlossI18n.create(settings && settings.language);
     } catch (err) { /* keep the browser default */ }
+    // init() applied labels with the browser language; re-apply them now that
+    // the interface language from the options page is known.
+    applyLabels();
     const key = readParam('key');
     const id = readParam('id');
     state.key = key;

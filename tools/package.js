@@ -14,7 +14,7 @@ const ROOT = path.join(__dirname, '..');
 const BUILD_DIR = path.join(ROOT, 'build');
 
 const INCLUDE_DIRS = ['src', 'icons', '_locales', 'docs'];
-const INCLUDE_FILES = ['manifest.json'];
+const INCLUDE_FILES = ['manifest.json', 'LICENSE'];
 
 // dev/ holds development-only helpers (for example the demo data seeder). It is
 // never shipped: the published package must not contain demo annotations or any

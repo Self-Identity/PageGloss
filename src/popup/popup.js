@@ -616,6 +616,7 @@
     el('clearPage').textContent = t('popupClearPage');
     el('llmTitle').textContent = t('optApiSection');
     el('openOptions').textContent = t('popupOpenOptions');
+    el('viewAllData').textContent = t('popupViewAll');
     el('notesPrev').textContent = t('popupPrev');
     el('notesNext').textContent = t('popupNext');
     el('notesPager').setAttribute('aria-label', t('popupMarks'));
@@ -653,6 +654,11 @@
       // Open the bundled help page in a tab; a popup cannot navigate itself.
       event.preventDefault();
       chrome.tabs.create({ url: chrome.runtime.getURL('docs/help.html') });
+      window.close();
+    });
+
+    el('viewAllData').addEventListener('click', function () {
+      chrome.tabs.create({ url: chrome.runtime.getURL('src/data/data.html') });
       window.close();
     });
 

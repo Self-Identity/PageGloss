@@ -9,6 +9,13 @@
 
 **语言 / Language:** [中文](#pagegloss) · [English](#english)
 
+## 1.2.1 更新
+
+- **修复全屏阅读页英文未覆盖**：页面先用浏览器语言渲染，设置里的语言加载后只重绘了正文，页头、按钮、占位提示仍停在旧语言。现在语言确定后会重新应用全部标签。
+- **弹窗新增「查看全部标注数据」**：点击直接打开标注数据总览页，与设置页的「查看」一致。
+- **许可证**：项目采用 **MIT License**（见 `LICENSE`），发行包内一并包含。
+- 版本号提升到 **1.2.1**。
+
 ## 1.2.0 更新
 
 - 版本号提升到 **1.2.0**，作为首个公开发布候选。
@@ -464,6 +471,13 @@ Select text, then use the floating button or the context menu to highlight **eve
 - All data stays in your browser; nothing goes anywhere except the endpoint you configure
 
 **Language:** [中文](#pagegloss) · [English](#english)
+
+## Changes in 1.2.1
+
+- Fixed the full-page reader not switching every label to English: it rendered with the browser language first and only re-rendered the body after the saved language loaded. All labels are re-applied once the language is known.
+- The popup now has a "View all annotation data" button that opens the overview directly.
+- Licensed under **MIT** (see `LICENSE`), included in the release archive.
+- Version bumped to **1.2.1**.
 
 ## Changes in 1.2.0
 

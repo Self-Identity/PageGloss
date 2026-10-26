@@ -1,6 +1,6 @@
 {
   "name": "pagegloss",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Zero-dependency Chrome/Edge extension: mark repeated text on a page and explain it with your own LLM.",
   "scripts": {
